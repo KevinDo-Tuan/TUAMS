@@ -32,7 +32,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ onModelChange, onChatOpen
       const config = await window.electronAPI.getCurrentLlmConfig();
       setCurrentConfig(config);
       setSelectedProvider(config.provider);
-      
+
       if (config.isOllama) {
         setSelectedOllamaModel(config.model);
         await loadOllamaModels();
@@ -48,8 +48,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ onModelChange, onChatOpen
     try {
       const models = await window.electronAPI.getAvailableOllamaModels();
       setAvailableOllamaModels(models);
-      
-      // Auto-select first model if none selected
+
       if (models.length > 0 && !selectedOllamaModel) {
         setSelectedOllamaModel(models[0]);
       }
@@ -77,7 +76,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ onModelChange, onChatOpen
     try {
       setConnectionStatus('testing');
       let result;
-      
+
       if (selectedProvider === 'ollama') {
         result = await window.electronAPI.switchToOllama(selectedOllamaModel, ollamaUrl);
       } else {
@@ -88,7 +87,6 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ onModelChange, onChatOpen
         await loadCurrentConfig();
         setConnectionStatus('success');
         onModelChange?.(selectedProvider, selectedProvider === 'ollama' ? selectedOllamaModel : 'gemini-2.0-flash');
-        // Auto-open chat window after successful model change
         setTimeout(() => {
           onChatOpen?.();
         }, 500);
@@ -104,17 +102,17 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ onModelChange, onChatOpen
 
   const getStatusColor = () => {
     switch (connectionStatus) {
-      case 'testing': return 'text-yellow-600';
-      case 'success': return 'text-green-600';
-      case 'error': return 'text-red-600';
-      default: return 'text-gray-600';
+      case 'testing': return 'text-yellow-400';
+      case 'success': return 'text-green-400';
+      case 'error': return 'text-red-400';
+      default: return 'text-white/50';
     }
   };
 
   const getStatusText = () => {
     switch (connectionStatus) {
-      case 'testing': return 'Testing connection...';
-      case 'success': return 'Connected successfully';
+      case 'testing': return 'Testing...';
+      case 'success': return 'Connected';
       case 'error': return `Error: ${errorMessage}`;
       default: return 'Ready';
     }
@@ -122,96 +120,95 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ onModelChange, onChatOpen
 
   if (isLoading) {
     return (
-      <div className="p-4 bg-white/20 backdrop-blur-md rounded-lg border border-white/30">
-        <div className="animate-pulse text-sm text-gray-600">Loading model configuration...</div>
+      <div className="p-4 bg-black/40 backdrop-blur-md rounded-lg border border-white/10">
+        <div className="text-xs text-white/50">Loading configuration...</div>
       </div>
     );
   }
 
   return (
-    <div className="p-4 bg-white/20 backdrop-blur-md rounded-lg border border-white/30 space-y-4">
+    <div className="p-4 bg-black/40 backdrop-blur-md rounded-lg border border-white/10 space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-800">AI Model Selection</h3>
-        <div className={`text-xs ${getStatusColor()}`}>
+        <h3 className="text-xs font-semibold text-white/90 tracking-wide">Model Settings</h3>
+        <span className={`text-[10px] ${getStatusColor()}`}>
           {getStatusText()}
-        </div>
+        </span>
       </div>
 
       {/* Current Status */}
       {currentConfig && (
-        <div className="text-xs text-gray-600 bg-white/40 p-2 rounded">
-          Current: {currentConfig.provider === 'ollama' ? '🏠' : '☁️'} {currentConfig.model}
+        <div className="text-[10px] text-white/50 bg-white/5 px-3 py-1.5 rounded border border-white/5">
+          Active: <span className="text-white/70 font-medium">{currentConfig.provider === 'ollama' ? 'Local' : 'Cloud'} / {currentConfig.model}</span>
         </div>
       )}
 
       {/* Provider Selection */}
-      <div className="space-y-2">
-        <label className="text-xs font-medium text-gray-700">Provider</label>
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-medium text-white/60 tracking-wide uppercase">Provider</label>
         <div className="flex gap-2">
           <button
             onClick={() => setSelectedProvider('gemini')}
-            className={`flex-1 px-3 py-2 rounded text-xs transition-all ${
+            className={`flex-1 px-3 py-1.5 rounded text-[11px] font-medium transition-all ${
               selectedProvider === 'gemini'
-                ? 'bg-blue-500 text-white shadow-md'
-                : 'bg-white/40 text-gray-700 hover:bg-white/60'
+                ? 'bg-blue-500/80 text-white'
+                : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70'
             }`}
           >
-            ☁️ Gemini (Cloud)
+            Gemini (Cloud)
           </button>
           <button
             onClick={() => setSelectedProvider('ollama')}
-            className={`flex-1 px-3 py-2 rounded text-xs transition-all ${
+            className={`flex-1 px-3 py-1.5 rounded text-[11px] font-medium transition-all ${
               selectedProvider === 'ollama'
-                ? 'bg-green-500 text-white shadow-md'
-                : 'bg-white/40 text-gray-700 hover:bg-white/60'
+                ? 'bg-emerald-500/80 text-white'
+                : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70'
             }`}
           >
-            🏠 Ollama (Local)
+            Ollama (Local)
           </button>
         </div>
       </div>
 
       {/* Provider-specific settings */}
       {selectedProvider === 'gemini' ? (
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-gray-700">Gemini API Key (optional if already set)</label>
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-medium text-white/60 tracking-wide uppercase">API Key (optional if set)</label>
           <input
             type="password"
-            placeholder="Enter API key to update..."
+            placeholder="Enter API key..."
             value={geminiApiKey}
             onChange={(e) => setGeminiApiKey(e.target.value)}
-            className="w-full px-3 py-2 text-xs bg-white/40 border border-white/60 rounded focus:outline-none focus:ring-2 focus:ring-blue-400/60"
+            className="w-full px-3 py-1.5 text-xs bg-white/5 border border-white/10 rounded text-white/90 placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-blue-400/40"
           />
         </div>
       ) : (
-        <div className="space-y-2">
-          <div>
-            <label className="text-xs font-medium text-gray-700">Ollama URL</label>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-medium text-white/60 tracking-wide uppercase">Ollama URL</label>
             <input
               type="url"
               value={ollamaUrl}
               onChange={(e) => setOllamaUrl(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-white/40 border border-white/60 rounded focus:outline-none focus:ring-2 focus:ring-green-400/60"
+              className="w-full px-3 py-1.5 text-xs bg-white/5 border border-white/10 rounded text-white/90 placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-emerald-400/40"
             />
           </div>
-          
-          <div>
+
+          <div className="space-y-1.5">
             <div className="flex items-center gap-2">
-              <label className="text-xs font-medium text-gray-700">Model</label>
+              <label className="text-[10px] font-medium text-white/60 tracking-wide uppercase">Model</label>
               <button
                 onClick={loadOllamaModels}
-                className="px-2 py-1 text-xs bg-white/60 hover:bg-white/80 rounded transition-all"
-                title="Refresh models"
+                className="px-2 py-0.5 text-[10px] bg-white/5 hover:bg-white/10 text-white/50 hover:text-white/70 rounded transition-all font-medium"
               >
-                🔄
+                Refresh
               </button>
             </div>
-            
+
             {availableOllamaModels.length > 0 ? (
               <select
                 value={selectedOllamaModel}
                 onChange={(e) => setSelectedOllamaModel(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-white/40 border border-white/60 rounded focus:outline-none focus:ring-2 focus:ring-green-400/60"
+                className="w-full px-3 py-1.5 text-xs bg-white/5 border border-white/10 rounded text-white/90 focus:outline-none focus:ring-1 focus:ring-emerald-400/40"
               >
                 {availableOllamaModels.map((model) => (
                   <option key={model} value={model}>
@@ -220,8 +217,8 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ onModelChange, onChatOpen
                 ))}
               </select>
             ) : (
-              <div className="text-xs text-gray-600 bg-yellow-100/60 p-2 rounded">
-                No Ollama models found. Make sure Ollama is running and models are installed.
+              <div className="text-[10px] text-yellow-400/70 bg-yellow-500/10 p-2 rounded border border-yellow-500/20">
+                No models found. Ensure Ollama is running.
               </div>
             )}
           </div>
@@ -229,28 +226,27 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ onModelChange, onChatOpen
       )}
 
       {/* Action buttons */}
-      <div className="flex gap-2 pt-2">
+      <div className="flex gap-2 pt-1">
         <button
           onClick={handleProviderSwitch}
           disabled={connectionStatus === 'testing'}
-          className="flex-1 px-3 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white text-xs rounded transition-all shadow-md"
+          className="flex-1 px-3 py-1.5 bg-blue-500/80 hover:bg-blue-500 disabled:bg-white/10 disabled:text-white/30 text-white text-[11px] font-medium rounded transition-all"
         >
-          {connectionStatus === 'testing' ? 'Switching...' : 'Apply Changes'}
+          {connectionStatus === 'testing' ? 'Switching...' : 'Apply'}
         </button>
-        
         <button
           onClick={testConnection}
           disabled={connectionStatus === 'testing'}
-          className="px-3 py-2 bg-gray-500 hover:bg-gray-600 disabled:bg-gray-400 text-white text-xs rounded transition-all shadow-md"
+          className="px-3 py-1.5 bg-white/10 hover:bg-white/15 disabled:bg-white/5 disabled:text-white/20 text-white/70 text-[11px] font-medium rounded transition-all"
         >
           Test
         </button>
       </div>
 
       {/* Help text */}
-      <div className="text-xs text-gray-600 space-y-1">
-        <div>💡 <strong>Gemini:</strong> Fast, cloud-based, requires API key</div>
-        <div>💡 <strong>Ollama:</strong> Private, local, requires Ollama installation</div>
+      <div className="text-[10px] text-white/40 space-y-0.5 pt-1 border-t border-white/5">
+        <div><span className="text-white/50 font-medium">Gemini</span> &mdash; Cloud-based, requires API key</div>
+        <div><span className="text-white/50 font-medium">Ollama</span> &mdash; Private, local, requires installation</div>
       </div>
     </div>
   );

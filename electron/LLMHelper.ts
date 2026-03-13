@@ -10,17 +10,18 @@ export class LLMHelper {
   private model: GenerativeModel | null = null
   private readonly systemPrompt = `You are Wingman AI, a helpful, proactive assistant for any kind of problem or situation (not just coding). For any user input, analyze the situation, provide a clear problem statement, relevant context, and suggest several possible responses or actions the user could take next. Always explain your reasoning. Present your suggestions as a list of options or next steps.`
   private useOllama: boolean = false
-  private ollamaModel: string = "llama3.2"
+  private ollamaModel: string = "mixtral"
   private ollamaUrl: string = "http://localhost:11434"
+  private static readonly FALLBACK_MODELS = ["gpt-oss:20b", "glm-5", "mixtral"]
 
   constructor(apiKey?: string, useOllama: boolean = false, ollamaModel?: string, ollamaUrl?: string) {
     this.useOllama = useOllama
-    
+
     if (useOllama) {
       this.ollamaUrl = ollamaUrl || "http://localhost:11434"
-      this.ollamaModel = ollamaModel || "gemma:latest" // Default fallback
+      this.ollamaModel = ollamaModel || "mixtral"
       console.log(`[LLMHelper] Using Ollama with model: ${this.ollamaModel}`)
-      
+
       // Auto-detect and use first available model if specified model doesn't exist
       this.initializeOllamaModel()
     } else if (apiKey) {
@@ -97,18 +98,27 @@ export class LLMHelper {
         return
       }
 
-      // Check if current model exists, if not use the first available
+      // Try fallback chain: gpt-oss:20b -> glm-5 -> mixtral -> first available
       if (!availableModels.includes(this.ollamaModel)) {
-        this.ollamaModel = availableModels[0]
-        console.log(`[LLMHelper] Auto-selected first available model: ${this.ollamaModel}`)
+        let found = false
+        for (const fallback of LLMHelper.FALLBACK_MODELS) {
+          if (availableModels.includes(fallback)) {
+            this.ollamaModel = fallback
+            console.log(`[LLMHelper] Using fallback model: ${this.ollamaModel}`)
+            found = true
+            break
+          }
+        }
+        if (!found) {
+          this.ollamaModel = availableModels[0]
+          console.log(`[LLMHelper] No fallback found, using first available: ${this.ollamaModel}`)
+        }
       }
 
-      // Test the selected model works
       const testResult = await this.callOllama("Hello")
       console.log(`[LLMHelper] Successfully initialized with model: ${this.ollamaModel}`)
     } catch (error) {
       console.error(`[LLMHelper] Failed to initialize Ollama model: ${error.message}`)
-      // Try to use first available model as fallback
       try {
         const models = await this.getOllamaModels()
         if (models.length > 0) {

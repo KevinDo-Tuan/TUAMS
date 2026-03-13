@@ -206,10 +206,10 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
   const handleModelChange = (provider: "ollama" | "gemini", model: string) => {
     setCurrentModel({ provider, model })
     // Update chat messages to reflect the model change
-    const modelName = provider === "ollama" ? model : "Gemini 3 Pro"
-    setChatMessages((msgs) => [...msgs, { 
-      role: "gemini", 
-      text: `🔄 Switched to ${provider === "ollama" ? "🏠" : "☁️"} ${modelName}. Ready for your questions!` 
+    const modelName = provider === "ollama" ? model : "Gemini"
+    setChatMessages((msgs) => [...msgs, {
+      role: "gemini",
+      text: `Switched to ${provider === "ollama" ? "Local" : "Cloud"} / ${modelName}. Ready.`
     }])
   }
 
@@ -255,12 +255,12 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
             <div className="mt-4 w-full mx-auto liquid-glass chat-container p-4 flex flex-col">
             <div className="flex-1 overflow-y-auto mb-3 p-3 rounded-lg bg-white/10 backdrop-blur-md max-h-64 min-h-[120px] glass-content border border-white/20 shadow-lg">
               {chatMessages.length === 0 ? (
-                <div className="text-sm text-gray-600 text-center mt-8">
-                  💬 Chat with {currentModel.provider === "ollama" ? "🏠" : "☁️"} {currentModel.model}
+                <div className="text-sm text-white/40 text-center mt-8">
+                  Chat with {currentModel.model}
                   <br />
-                  <span className="text-xs text-gray-500">Take a screenshot (Cmd+H) for automatic analysis</span>
+                  <span className="text-[10px] text-white/30">Take a screenshot (Ctrl+H) for automatic analysis</span>
                   <br />
-                  <span className="text-xs text-gray-500">Click ⚙️ Models to switch AI providers</span>
+                  <span className="text-[10px] text-white/30">Click Models to switch AI providers</span>
                 </div>
               ) : (
                 chatMessages.map((msg, idx) => (
