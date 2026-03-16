@@ -103,12 +103,12 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   })
 
-  ipcMain.handle("gemini-chat", async (event, message: string) => {
+  ipcMain.handle("ai-chat", async (event, message: string) => {
     try {
       const result = await appState.processingHelper.getLLMHelper().chatWithGemini(message);
       return result;
     } catch (error: any) {
-      console.error("Error in gemini-chat handler:", error);
+      console.error("Error in ai-chat handler:", error);
       throw error;
     }
   });
@@ -175,13 +175,13 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  ipcMain.handle("switch-to-gemini", async (_, apiKey?: string) => {
+  ipcMain.handle("switch-to-cloud", async (_, model?: string) => {
     try {
       const llmHelper = appState.processingHelper.getLLMHelper();
-      await llmHelper.switchToGemini(apiKey);
+      await llmHelper.switchToGemini(model);
       return { success: true };
     } catch (error: any) {
-      console.error("Error switching to Gemini:", error);
+      console.error("Error switching to cloud model:", error);
       return { success: false, error: error.message };
     }
   });

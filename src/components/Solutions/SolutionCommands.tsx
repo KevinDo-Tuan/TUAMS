@@ -17,7 +17,7 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
     if (onTooltipVisibilityChange) {
       let tooltipHeight = 0
       if (tooltipRef.current && isTooltipVisible) {
-        tooltipHeight = tooltipRef.current.offsetHeight + 10 // Adjust if necessary
+        tooltipHeight = tooltipRef.current.offsetHeight + 10
       }
       onTooltipVisibilityChange(isTooltipVisible, tooltipHeight)
     }
@@ -34,174 +34,115 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
   return (
     <div>
       <div className="pt-2 w-fit">
-        <div className="text-xs text-white/90 backdrop-blur-md bg-black/60 rounded-lg py-2 px-4 flex items-center justify-center gap-4">
+        <div className="text-xs liquid-glass-bar py-1 px-3 flex items-center justify-center gap-2.5 draggable-area">
+
           {/* Show/Hide */}
-          <div className="flex items-center gap-2 whitespace-nowrap">
-            <span className="text-[11px] leading-none">Show/Hide</span>
-            <div className="flex gap-1">
-              <button className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-                ⌘
-              </button>
-              <button className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-                B
-              </button>
+          <div className="flex items-center gap-1.5 group/cmd">
+            <span className="text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
+              Show/Hide
+            </span>
+            <div className="flex gap-0.5">
+              <span className="kbd-key">Ctrl</span>
+              <span className="kbd-key">B</span>
             </div>
           </div>
+
+          <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/20 to-transparent" />
 
           {/* Screenshot */}
-          <div className="flex items-center gap-2 whitespace-nowrap">
-            <span className="text-[11px] leading-none truncate">
-              {extraScreenshots.length === 0
-                ? "Screenshot your code"
-                : "Screenshot"}
+          <div className="flex items-center gap-1.5 group/cmd">
+            <span className="text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
+              {extraScreenshots.length === 0 ? "Screenshot your code" : "Screenshot"}
             </span>
-            <div className="flex gap-1">
-              <button className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-                ⌘
-              </button>
-              <button className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-                H
-              </button>
+            <div className="flex gap-0.5">
+              <span className="kbd-key">Ctrl</span>
+              <span className="kbd-key">Shift</span>
+              <span className="kbd-key">H</span>
             </div>
           </div>
+
           {extraScreenshots.length > 0 && (
-            <div className="flex items-center gap-2 whitespace-nowrap">
-              <span className="text-[11px] leading-none">Debug</span>
-              <div className="flex gap-1">
-                <button className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-                  ⌘
-                </button>
-                <button className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-                  ↵
-                </button>
+            <>
+              <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/20 to-transparent" />
+              <div className="flex items-center gap-1.5 group/cmd animate-fade-in">
+                <span className="text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
+                  Debug
+                </span>
+                <div className="flex gap-0.5">
+                  <span className="kbd-key">Ctrl</span>
+                  <span className="kbd-key">Shift</span>
+                  <span className="kbd-key">Enter</span>
+                </div>
               </div>
-            </div>
+            </>
           )}
 
+          <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/20 to-transparent" />
+
           {/* Start Over */}
-          <div className="flex items-center gap-2 whitespace-nowrap">
-            <span className="text-[11px] leading-none">Start over</span>
-            <div className="flex gap-1">
-              <button className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-                ⌘
-              </button>
-              <button className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-                R
-              </button>
+          <div className="flex items-center gap-1.5 group/cmd">
+            <span className="text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
+              Start over
+            </span>
+            <div className="flex gap-0.5">
+              <span className="kbd-key">Ctrl</span>
+              <span className="kbd-key">Shift</span>
+              <span className="kbd-key">R</span>
             </div>
           </div>
 
-          {/* Question Mark with Tooltip */}
+          <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/20 to-transparent" />
+
+          {/* Help tooltip */}
           <div
-            className="relative inline-block"
+            className="relative inline-block interactive"
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
           >
-            {/* Question mark circle */}
-            <div className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-sm transition-colors flex items-center justify-center cursor-help z-10">
-              <span className="text-xs text-white/70">?</span>
+            <div className="w-5 h-5 rounded-full bg-white/8 hover:bg-white/15 transition-all duration-200 flex items-center justify-center cursor-help border border-white/5 hover:border-white/10">
+              <span className="text-[10px] text-red-200/70">?</span>
             </div>
 
-            {/* Tooltip Content */}
             {isTooltipVisible && (
               <div
                 ref={tooltipRef}
-                className="absolute top-full right-0 mt-2 w-80"
-                style={{ zIndex: 100 }}
+                className="absolute top-full right-0 mt-2 w-72 z-50 animate-scale-in"
               >
-                <div className="p-3 text-xs bg-black/80 backdrop-blur-md rounded-lg border border-white/10 text-white/90 shadow-lg">
-                  {/* Tooltip content */}
-                  <div className="space-y-4">
-                    <h3 className="font-medium whitespace-nowrap">
-                      Keyboard Shortcuts
-                    </h3>
-                    <div className="space-y-3">
-                      {/* Toggle Command */}
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="whitespace-nowrap">
-                            Toggle Window
-                          </span>
-                          <div className="flex gap-1">
-                            <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] leading-none">
-                              ⌘
-                            </span>
-                            <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] leading-none">
-                              B
-                            </span>
-                          </div>
+                <div className="p-3.5 text-xs liquid-glass-dark text-red-100/90 shadow-2xl">
+                  <h3 className="font-semibold text-red-200 mb-3 text-[13px]">Keyboard Shortcuts</h3>
+                  <div className="space-y-2.5">
+                    {[
+                      { label: 'Toggle Window', keys: ['Ctrl', 'B'], desc: 'Show or hide this window' },
+                      { label: 'Screenshot', keys: ['Ctrl', 'Shift', 'H'], desc: 'Capture code for debugging' },
+                      { label: 'Debug', keys: ['Ctrl', 'Shift', 'Enter'], desc: 'Generate new solutions from screenshots' },
+                      { label: 'Start Over', keys: ['Ctrl', 'Shift', 'R'], desc: 'Start fresh with a new question' },
+                      { label: 'Center Window', keys: ['Ctrl', 'Shift', 'Space'], desc: 'Center and show window' },
+                      { label: 'Move Window', keys: ['Ctrl', 'Shift', 'Arrows'], desc: 'Reposition the window' },
+                    ].map(({ label, keys, desc }) => (
+                      <div key={label} className="flex items-start justify-between gap-3 group/item">
+                        <div>
+                          <div className="font-medium text-red-200 group-hover/item:text-red-100 transition-colors duration-200">{label}</div>
+                          <div className="text-[10px] text-red-300/50 mt-0.5">{desc}</div>
                         </div>
-                        <p className="text-[10px] leading-relaxed text-white/70 whitespace-nowrap truncate">
-                          Show or hide this window.
-                        </p>
-                      </div>
-                      {/* Screenshot Command */}
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="whitespace-nowrap">
-                            Take Screenshot
-                          </span>
-                          <div className="flex gap-1">
-                            <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] leading-none">
-                              ⌘
-                            </span>
-                            <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] leading-none">
-                              H
-                            </span>
-                          </div>
+                        <div className="flex gap-1 flex-shrink-0 mt-0.5">
+                          {keys.map((k) => (
+                            <span key={k} className="kbd-key">{k}</span>
+                          ))}
                         </div>
-                        <p className="text-[10px] leading-relaxed text-white/70 whitespace-nowrap truncate">
-                          Capture additional parts of the question or your
-                          solution for debugging help. Up to 5 extra screenshots
-                          are saved.
-                        </p>
                       </div>
-                      {/* Debug Command */}
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="whitespace-nowrap">Debug</span>
-                          <div className="flex gap-1">
-                            <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] leading-none">
-                              ⌘
-                            </span>
-                            <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] leading-none">
-                              ↵
-                            </span>
-                          </div>
-                        </div>
-                        <p className="text-[10px] leading-relaxed text-white/70 whitespace-nowrap truncate">
-                          Generate new solutions based on all previous and newly
-                          added screenshots.
-                        </p>
-                      </div>
-                      {/* Start Over Command */}
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="whitespace-nowrap">Start Over</span>
-                          <div className="flex gap-1">
-                            <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] leading-none">
-                              ⌘
-                            </span>
-                            <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] leading-none">
-                              R
-                            </span>
-                          </div>
-                        </div>
-                        <p className="text-[10px] leading-relaxed text-white/70 whitespace-nowrap truncate">
-                          Start fresh with a new question.
-                        </p>
-                      </div>
-                    </div>
+                    ))}
                   </div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Sign Out Button */}
+          <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/20 to-transparent" />
+
+          {/* Quit */}
           <button
-            className="text-red-500/70 hover:text-red-500/90 transition-colors hover:cursor-pointer"
-            title="Sign Out"
+            className="text-red-400/60 hover:text-red-300 transition-all duration-200 hover:scale-110"
+            title="Quit"
             onClick={() => window.electronAPI.quitApp()}
           >
             <IoLogOutOutline className="w-4 h-4" />

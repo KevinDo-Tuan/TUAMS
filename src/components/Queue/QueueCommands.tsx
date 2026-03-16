@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from "react"
 import { IoLogOutOutline } from "react-icons/io5"
-import { Dialog, DialogContent, DialogClose } from "../ui/dialog"
 
 interface QueueCommandsProps {
   onTooltipVisibilityChange: (visible: boolean, height: number) => void
@@ -21,7 +20,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null)
   const [audioResult, setAudioResult] = useState<string | null>(null)
   const chunks = useRef<Blob[]>([])
-  // Remove all chat-related state, handlers, and the Dialog overlay from this file.
 
   useEffect(() => {
     let tooltipHeight = 0
@@ -31,17 +29,8 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     onTooltipVisibilityChange(isTooltipVisible, tooltipHeight)
   }, [isTooltipVisible])
 
-  const handleMouseEnter = () => {
-    setIsTooltipVisible(true)
-  }
-
-  const handleMouseLeave = () => {
-    setIsTooltipVisible(false)
-  }
-
   const handleRecordClick = async () => {
     if (!isRecording) {
-      // Start recording
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
         const recorder = new MediaRecorder(stream)
@@ -55,7 +44,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
             try {
               const result = await window.electronAPI.analyzeAudioFromBase64(base64Data, blob.type)
               setAudioResult(result.text)
-            } catch (err) {
+            } catch {
               setAudioResult('Audio analysis failed.')
             }
           }
@@ -64,194 +53,154 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         setMediaRecorder(recorder)
         recorder.start()
         setIsRecording(true)
-      } catch (err) {
+      } catch {
         setAudioResult('Could not start recording.')
       }
     } else {
-      // Stop recording
       mediaRecorder?.stop()
       setIsRecording(false)
       setMediaRecorder(null)
     }
   }
 
-  // Remove handleChatSend function
+  const Kbd = ({ children }: { children: React.ReactNode }) => (
+    <span className="kbd-key">{children}</span>
+  )
 
   return (
     <div className="w-fit">
-      <div className="text-xs text-white/90 liquid-glass-bar py-1 px-4 flex items-center justify-center gap-4 draggable-area">
+      <div className="text-xs liquid-glass-bar py-1 px-3 flex items-center justify-center gap-2.5 draggable-area">
+
         {/* Show/Hide */}
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] leading-none">Show/Hide</span>
-          <div className="flex gap-1">
-            <button className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-              ⌘
-            </button>
-            <button className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-              B
-            </button>
+        <div className="flex items-center gap-1.5 group/cmd">
+          <span className="text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
+            Show/Hide
+          </span>
+          <div className="flex gap-0.5">
+            <Kbd>Ctrl</Kbd><Kbd>B</Kbd>
           </div>
         </div>
+
+        <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/20 to-transparent" />
 
         {/* Screenshot */}
-        {/* Removed screenshot button from main bar for seamless screenshot-to-LLM UX */}
-
-        {/* Solve Command */}
-        {screenshots.length > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] leading-none">Solve</span>
-            <div className="flex gap-1">
-              <button className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-                ⌘
-              </button>
-              <button className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-                ↵
-              </button>
-            </div>
+        <div className="flex items-center gap-1.5 group/cmd">
+          <span className="text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
+            Screenshot
+          </span>
+          <div className="flex gap-0.5">
+            <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>H</Kbd>
           </div>
+        </div>
+
+        {/* Solve */}
+        {screenshots.length > 0 && (
+          <>
+            <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/20 to-transparent" />
+            <div className="flex items-center gap-1.5 group/cmd animate-fade-in">
+              <span className="text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
+                Solve
+              </span>
+              <div className="flex gap-0.5">
+                <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>Enter</Kbd>
+              </div>
+            </div>
+          </>
         )}
 
-        {/* Voice Recording Button */}
-        <div className="flex items-center gap-2">
-          <button
-            className={`bg-white/10 hover:bg-white/20 transition-colors rounded-md px-2 py-1 text-[11px] leading-none text-white/70 flex items-center gap-1 ${isRecording ? 'bg-red-500/70 hover:bg-red-500/90' : ''}`}
-            onClick={handleRecordClick}
-            type="button"
-          >
-            {isRecording ? (
-              <span className="animate-pulse">● Stop Recording</span>
-            ) : (
-              <span>🎤 Record Voice</span>
-            )}
-          </button>
-        </div>
+        <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/20 to-transparent" />
 
-        {/* Chat Button */}
-        <div className="flex items-center gap-2">
-          <button
-            className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-2 py-1 text-[11px] leading-none text-white/70 flex items-center gap-1"
-            onClick={onChatToggle}
-            type="button"
-          >
-            💬 Chat
-          </button>
-        </div>
-
-        {/* Settings Button */}
-        <div className="flex items-center gap-2">
-          <button
-            className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-2 py-1 text-[11px] leading-none text-white/70 flex items-center gap-1"
-            onClick={onSettingsToggle}
-            type="button"
-          >
-            ⚙️ Models
-          </button>
-        </div>
-
-        {/* Add this button in the main button row, before the separator and sign out */}
-        {/* Remove the Chat button */}
-
-        {/* Question mark with tooltip */}
-        <div
-          className="relative inline-block"
-          onMouseEnter={handleMouseEnter}
-          onMouseLeave={handleMouseLeave}
+        {/* Voice Recording */}
+        <button
+          className={`glass-btn flex items-center gap-1.5 transition-all duration-300 ${
+            isRecording
+              ? 'bg-[hsla(0,72%,51%,0.3)] border-[hsla(0,72%,51%,0.4)] text-white animate-glow'
+              : ''
+          }`}
+          onClick={handleRecordClick}
+          type="button"
         >
-          <div className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-sm transition-colors flex items-center justify-center cursor-help z-10">
-            <span className="text-xs text-white/70">?</span>
+          <span className={`inline-block w-1.5 h-1.5 rounded-full transition-all duration-300 ${
+            isRecording ? 'bg-[hsl(0,72%,60%)] animate-pulse' : 'bg-[hsla(0,72%,60%,0.5)]'
+          }`} />
+          {isRecording ? 'Stop' : 'Record'}
+        </button>
+
+        {/* Chat */}
+        <button
+          className="glass-btn"
+          onClick={onChatToggle}
+          type="button"
+        >
+          Chat
+        </button>
+
+        {/* Models */}
+        <button
+          className="glass-btn"
+          onClick={onSettingsToggle}
+          type="button"
+        >
+          Models
+        </button>
+
+        {/* Help tooltip */}
+        <div
+          className="relative inline-block interactive"
+          onMouseEnter={() => setIsTooltipVisible(true)}
+          onMouseLeave={() => setIsTooltipVisible(false)}
+        >
+          <div className="w-5 h-5 rounded-full bg-white/8 hover:bg-white/15 transition-all duration-200 flex items-center justify-center cursor-help border border-white/5 hover:border-white/10">
+            <span className="text-[10px] text-red-200/70">?</span>
           </div>
-
-          {/* Tooltip Content */}
           {isTooltipVisible && (
-            <div
-              ref={tooltipRef}
-              className="absolute top-full right-0 mt-2 w-80"
-            >
-              <div className="p-3 text-xs bg-black/80 backdrop-blur-md rounded-lg border border-white/10 text-white/90 shadow-lg">
-                <div className="space-y-4">
-                  <h3 className="font-medium truncate">Keyboard Shortcuts</h3>
-                  <div className="space-y-3">
-                    {/* Toggle Command */}
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="truncate">Toggle Window</span>
-                        <div className="flex gap-1 flex-shrink-0">
-                          <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] leading-none">
-                            ⌘
-                          </span>
-                          <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] leading-none">
-                            B
-                          </span>
-                        </div>
+            <div ref={tooltipRef} className="absolute top-full right-0 mt-2 w-72 z-50 animate-scale-in">
+              <div className="p-3.5 text-xs liquid-glass-dark text-red-100/90 shadow-2xl">
+                <h3 className="font-semibold text-red-200 mb-3 text-[13px]">Keyboard Shortcuts</h3>
+                <div className="space-y-2.5">
+                  {[
+                    { label: 'Toggle Window', keys: ['Ctrl', 'B'], desc: 'Show or hide this window' },
+                    { label: 'Screenshot', keys: ['Ctrl', 'Shift', 'H'], desc: 'Capture current screen' },
+                    { label: 'Solve', keys: ['Ctrl', 'Shift', 'Enter'], desc: 'Generate solution from screenshots' },
+                    { label: 'Reset', keys: ['Ctrl', 'Shift', 'R'], desc: 'Clear all screenshots & reset' },
+                    { label: 'Center Window', keys: ['Ctrl', 'Shift', 'Space'], desc: 'Center and show window' },
+                    { label: 'Move Window', keys: ['Ctrl', 'Shift', 'Arrows'], desc: 'Reposition the window' },
+                  ].map(({ label, keys, desc }) => (
+                    <div key={label} className="flex items-start justify-between gap-3 group/item">
+                      <div>
+                        <div className="font-medium text-red-200 group-hover/item:text-red-100 transition-colors duration-200">{label}</div>
+                        <div className="text-[10px] text-red-300/50 mt-0.5">{desc}</div>
                       </div>
-                      <p className="text-[10px] leading-relaxed text-white/70 truncate">
-                        Show or hide this window.
-                      </p>
-                    </div>
-                    {/* Screenshot Command */}
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="truncate">Take Screenshot</span>
-                        <div className="flex gap-1 flex-shrink-0">
-                          <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] leading-none">
-                            ⌘
-                          </span>
-                          <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] leading-none">
-                            H
-                          </span>
-                        </div>
+                      <div className="flex gap-1 flex-shrink-0 mt-0.5">
+                        {keys.map((k) => (
+                          <span key={k} className="kbd-key">{k}</span>
+                        ))}
                       </div>
-                      <p className="text-[10px] leading-relaxed text-white/70 truncate">
-                        Take a screenshot of the problem description. The tool
-                        will extract and analyze the problem. The 5 latest
-                        screenshots are saved.
-                      </p>
                     </div>
-
-                    {/* Solve Command */}
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="truncate">Solve Problem</span>
-                        <div className="flex gap-1 flex-shrink-0">
-                          <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] leading-none">
-                            ⌘
-                          </span>
-                          <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] leading-none">
-                            ↵
-                          </span>
-                        </div>
-                      </div>
-                      <p className="text-[10px] leading-relaxed text-white/70 truncate">
-                        Generate a solution based on the current problem.
-                      </p>
-                    </div>
-                  </div>
+                  ))}
                 </div>
               </div>
             </div>
           )}
         </div>
 
-        {/* Separator */}
-        <div className="mx-2 h-4 w-px bg-white/20" />
+        <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/20 to-transparent" />
 
-        {/* Sign Out Button - Moved to end */}
+        {/* Quit */}
         <button
-          className="text-red-500/70 hover:text-red-500/90 transition-colors hover:cursor-pointer"
-          title="Sign Out"
+          className="text-red-400/60 hover:text-red-300 transition-all duration-200 hover:scale-110"
+          title="Quit"
           onClick={() => window.electronAPI.quitApp()}
         >
           <IoLogOutOutline className="w-4 h-4" />
         </button>
       </div>
-      {/* Audio Result Display */}
+
       {audioResult && (
-        <div className="mt-2 p-2 bg-white/10 rounded text-white text-xs max-w-md">
-          <span className="font-semibold">Audio Result:</span> {audioResult}
+        <div className="mt-2 liquid-glass-dark p-3 text-red-100 text-xs max-w-md animate-slide-up">
+          <span className="font-semibold text-red-300">Audio:</span> {audioResult}
         </div>
       )}
-      {/* Chat Dialog Overlay */}
-      {/* Remove the Dialog component */}
     </div>
   )
 }

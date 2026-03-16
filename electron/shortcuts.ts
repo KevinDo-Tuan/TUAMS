@@ -1,5 +1,5 @@
-import { globalShortcut, app } from "electron"
-import { AppState } from "./main" // Adjust the import path if necessary
+import { globalShortcut, app, BrowserWindow } from "electron"
+import { AppState } from "./main"
 
 export class ShortcutsHelper {
   private appState: AppState
@@ -9,84 +9,66 @@ export class ShortcutsHelper {
   }
 
   public registerGlobalShortcuts(): void {
-    // Add global shortcut to show/center window
-    globalShortcut.register("CommandOrControl+Shift+Space", () => {
-      console.log("Show/Center window shortcut pressed...")
+    const register = (key: string, fn: () => void) => {
+      globalShortcut.register(key, fn)
+      const ok = globalShortcut.isRegistered(key)
+      if (!ok) console.error(`[Shortcuts] Failed to register: ${key}`)
+      else console.log(`[Shortcuts] Registered: ${key}`)
+    }
+
+    register("CommandOrControl+Shift+Space", () => {
       this.appState.centerAndShowWindow()
     })
 
-    globalShortcut.register("CommandOrControl+H", async () => {
+    register("CommandOrControl+Shift+H", async () => {
       const mainWindow = this.appState.getMainWindow()
       if (mainWindow) {
-        console.log("Taking screenshot...")
         try {
           const screenshotPath = await this.appState.takeScreenshot()
           const preview = await this.appState.getImagePreview(screenshotPath)
-          mainWindow.webContents.send("screenshot-taken", {
-            path: screenshotPath,
-            preview
-          })
+          mainWindow.webContents.send("screenshot-taken", { path: screenshotPath, preview })
         } catch (error) {
           console.error("Error capturing screenshot:", error)
         }
       }
     })
 
-    globalShortcut.register("CommandOrControl+Enter", async () => {
+    register("CommandOrControl+Shift+Enter", async () => {
       await this.appState.processingHelper.processScreenshots()
     })
 
-    globalShortcut.register("CommandOrControl+R", () => {
-      console.log(
-        "Command + R pressed. Canceling requests and resetting queues..."
-      )
-
-      // Cancel ongoing API requests
+    register("CommandOrControl+Shift+R", () => {
       this.appState.processingHelper.cancelOngoingRequests()
-
-      // Clear both screenshot queues
       this.appState.clearQueues()
-
-      console.log("Cleared queues.")
-
-      // Update the view state to 'queue'
       this.appState.setView("queue")
-
-      // Notify renderer process to switch view to 'queue'
       const mainWindow = this.appState.getMainWindow()
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send("reset-view")
       }
     })
 
-    // New shortcuts for moving the window
-    globalShortcut.register("CommandOrControl+Left", () => {
-      console.log("Command/Ctrl + Left pressed. Moving window left.")
+    register("CommandOrControl+Shift+Left", () => {
       this.appState.moveWindowLeft()
     })
 
-    globalShortcut.register("CommandOrControl+Right", () => {
-      console.log("Command/Ctrl + Right pressed. Moving window right.")
+    register("CommandOrControl+Shift+Right", () => {
       this.appState.moveWindowRight()
     })
-    globalShortcut.register("CommandOrControl+Down", () => {
-      console.log("Command/Ctrl + down pressed. Moving window down.")
+
+    register("CommandOrControl+Shift+Down", () => {
       this.appState.moveWindowDown()
     })
-    globalShortcut.register("CommandOrControl+Up", () => {
-      console.log("Command/Ctrl + Up pressed. Moving window Up.")
+
+    register("CommandOrControl+Shift+Up", () => {
       this.appState.moveWindowUp()
     })
 
-    globalShortcut.register("CommandOrControl+B", () => {
+    register("CommandOrControl+B", () => {
       this.appState.toggleMainWindow()
-      // If window exists and we're showing it, bring it to front
       const mainWindow = this.appState.getMainWindow()
       if (mainWindow && !this.appState.isVisible()) {
-        // Force the window to the front on macOS
         if (process.platform === "darwin") {
           mainWindow.setAlwaysOnTop(true, "normal")
-          // Reset alwaysOnTop after a brief delay
           setTimeout(() => {
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.setAlwaysOnTop(true, "floating")
@@ -96,9 +78,19 @@ export class ShortcutsHelper {
       }
     })
 
-    // Unregister shortcuts when quitting
     app.on("will-quit", () => {
       globalShortcut.unregisterAll()
     })
+  }
+
+  public reregisterShortcuts(): void {
+    globalShortcut.unregisterAll()
+    this.registerGlobalShortcuts()
+
+    // Also restore the window if it was somehow hidden
+    const mainWindow = this.appState.getMainWindow()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setAlwaysOnTop(true)
+    }
   }
 }

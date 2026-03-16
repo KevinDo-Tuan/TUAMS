@@ -1,25 +1,33 @@
 import React, { useState, useEffect } from 'react';
 
+const CLOUD_MODELS = [
+  "glm-5:cloud",
+  "gpt-oss:20b-cloud",
+  "llama3.3:cloud",
+  "phi4-mini:cloud",
+  "qwen2.5:cloud",
+];
+
 interface ModelConfig {
-  provider: "ollama" | "gemini";
+  provider: "ollama" | "cloud";
   model: string;
   isOllama: boolean;
 }
 
 interface ModelSelectorProps {
-  onModelChange?: (provider: "ollama" | "gemini", model: string) => void;
+  onModelChange?: (provider: "ollama" | "cloud", model: string) => void;
   onChatOpen?: () => void;
 }
 
 const ModelSelector: React.FC<ModelSelectorProps> = ({ onModelChange, onChatOpen }) => {
   const [currentConfig, setCurrentConfig] = useState<ModelConfig | null>(null);
-  const [availableOllamaModels, setAvailableOllamaModels] = useState<string[]>([]);
+  const [localModels, setLocalModels] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState<'testing' | 'success' | 'error' | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
-  const [geminiApiKey, setGeminiApiKey] = useState('');
-  const [selectedProvider, setSelectedProvider] = useState<"ollama" | "gemini">("gemini");
-  const [selectedOllamaModel, setSelectedOllamaModel] = useState<string>("");
+  const [selectedProvider, setSelectedProvider] = useState<"ollama" | "cloud">("ollama");
+  const [selectedLocalModel, setSelectedLocalModel] = useState<string>("");
+  const [selectedCloudModel, setSelectedCloudModel] = useState<string>(CLOUD_MODELS[0]);
   const [ollamaUrl, setOllamaUrl] = useState<string>("http://localhost:11434");
 
   useEffect(() => {
@@ -32,11 +40,12 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ onModelChange, onChatOpen
       const config = await window.electronAPI.getCurrentLlmConfig();
       setCurrentConfig(config);
       setSelectedProvider(config.provider);
-      
-      if (config.isOllama) {
-        setSelectedOllamaModel(config.model);
-        await loadOllamaModels();
+      if (config.provider === 'cloud') {
+        setSelectedCloudModel(config.model);
+      } else {
+        setSelectedLocalModel(config.model);
       }
+      await loadLocalModels();
     } catch (error) {
       console.error('Error loading current config:', error);
     } finally {
@@ -44,18 +53,17 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ onModelChange, onChatOpen
     }
   };
 
-  const loadOllamaModels = async () => {
+  const loadLocalModels = async () => {
     try {
       const models = await window.electronAPI.getAvailableOllamaModels();
-      setAvailableOllamaModels(models);
-      
-      // Auto-select first model if none selected
-      if (models.length > 0 && !selectedOllamaModel) {
-        setSelectedOllamaModel(models[0]);
+      const local = models.filter((m: string) => !CLOUD_MODELS.includes(m));
+      setLocalModels(local);
+      if (local.length > 0 && !selectedLocalModel) {
+        setSelectedLocalModel(local[0]);
       }
     } catch (error) {
-      console.error('Error loading Ollama models:', error);
-      setAvailableOllamaModels([]);
+      console.error('Error loading local models:', error);
+      setLocalModels([]);
     }
   };
 
@@ -64,34 +72,29 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ onModelChange, onChatOpen
       setConnectionStatus('testing');
       const result = await window.electronAPI.testLlmConnection();
       setConnectionStatus(result.success ? 'success' : 'error');
-      if (!result.success) {
-        setErrorMessage(result.error || 'Unknown error');
-      }
+      if (!result.success) setErrorMessage(result.error || 'Unknown error');
     } catch (error) {
       setConnectionStatus('error');
       setErrorMessage(String(error));
     }
   };
 
-  const handleProviderSwitch = async () => {
+  const handleApply = async () => {
     try {
       setConnectionStatus('testing');
       let result;
-      
+
       if (selectedProvider === 'ollama') {
-        result = await window.electronAPI.switchToOllama(selectedOllamaModel, ollamaUrl);
+        result = await window.electronAPI.switchToOllama(selectedLocalModel, ollamaUrl);
       } else {
-        result = await window.electronAPI.switchToGemini(geminiApiKey || undefined);
+        result = await window.electronAPI.switchToCloud(selectedCloudModel);
       }
 
       if (result.success) {
         await loadCurrentConfig();
         setConnectionStatus('success');
-        onModelChange?.(selectedProvider, selectedProvider === 'ollama' ? selectedOllamaModel : 'gemini-2.0-flash');
-        // Auto-open chat window after successful model change
-        setTimeout(() => {
-          onChatOpen?.();
-        }, 500);
+        onModelChange?.(selectedProvider, selectedProvider === 'ollama' ? selectedLocalModel : selectedCloudModel);
+        setTimeout(() => onChatOpen?.(), 500);
       } else {
         setConnectionStatus('error');
         setErrorMessage(result.error || 'Switch failed');
@@ -104,17 +107,17 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ onModelChange, onChatOpen
 
   const getStatusColor = () => {
     switch (connectionStatus) {
-      case 'testing': return 'text-yellow-600';
-      case 'success': return 'text-green-600';
-      case 'error': return 'text-red-600';
-      default: return 'text-gray-600';
+      case 'testing': return 'text-amber-500';
+      case 'success': return 'text-emerald-500';
+      case 'error': return 'text-red-500';
+      default: return 'text-red-400/50';
     }
   };
 
   const getStatusText = () => {
     switch (connectionStatus) {
-      case 'testing': return 'Testing connection...';
-      case 'success': return 'Connected successfully';
+      case 'testing': return 'Applying...';
+      case 'success': return 'Connected';
       case 'error': return `Error: ${errorMessage}`;
       default: return 'Ready';
     }
@@ -122,135 +125,142 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ onModelChange, onChatOpen
 
   if (isLoading) {
     return (
-      <div className="p-4 bg-white/20 backdrop-blur-md rounded-lg border border-white/30">
-        <div className="animate-pulse text-sm text-gray-600">Loading model configuration...</div>
+      <div className="liquid-glass p-4">
+        <div className="animate-pulse text-sm text-red-700/50">Loading model configuration...</div>
       </div>
     );
   }
 
   return (
-    <div className="p-4 bg-white/20 backdrop-blur-md rounded-lg border border-white/30 space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-800">AI Model Selection</h3>
-        <div className={`text-xs ${getStatusColor()}`}>
+    <div className="liquid-glass p-4 space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between glass-content">
+        <h3 className="text-sm font-bold text-red-900/80 tracking-tight">AI Model</h3>
+        <div className={`text-[11px] font-medium ${getStatusColor()} transition-colors duration-300`}>
           {getStatusText()}
         </div>
       </div>
 
-      {/* Current Status */}
+      {/* Active Model Card */}
       {currentConfig && (
-        <div className="text-xs text-gray-600 bg-white/40 p-2 rounded">
-          Current: {currentConfig.provider === 'ollama' ? '🏠' : '☁️'} {currentConfig.model}
+        <div className="glass-content liquid-glass-dark p-3 animate-fade-in" style={{ borderRadius: '0.75rem' }}>
+          <div className="flex items-center gap-2">
+            <span className="status-dot flex-shrink-0" />
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-red-300/70">Active</span>
+          </div>
+          <div className="font-mono font-bold text-sm mt-1.5 text-white/90">{currentConfig.model}</div>
+          <div className="text-[10px] text-red-300/50 mt-0.5">
+            {currentConfig.provider === 'ollama' ? 'Local (Ollama)' : 'Cloud (via Ollama)'}
+          </div>
         </div>
       )}
 
-      {/* Provider Selection */}
-      <div className="space-y-2">
-        <label className="text-xs font-medium text-gray-700">Provider</label>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setSelectedProvider('gemini')}
-            className={`flex-1 px-3 py-2 rounded text-xs transition-all ${
-              selectedProvider === 'gemini'
-                ? 'bg-blue-500 text-white shadow-md'
-                : 'bg-white/40 text-gray-700 hover:bg-white/60'
-            }`}
-          >
-            ☁️ Gemini (Cloud)
-          </button>
-          <button
-            onClick={() => setSelectedProvider('ollama')}
-            className={`flex-1 px-3 py-2 rounded text-xs transition-all ${
-              selectedProvider === 'ollama'
-                ? 'bg-green-500 text-white shadow-md'
-                : 'bg-white/40 text-gray-700 hover:bg-white/60'
-            }`}
-          >
-            🏠 Ollama (Local)
-          </button>
-        </div>
+      {/* Provider Toggle */}
+      <div className="flex gap-1.5 glass-content p-1 bg-red-50/50 rounded-xl border border-red-200/20">
+        <button
+          onClick={() => setSelectedProvider('cloud')}
+          className={`flex-1 px-3 py-2 rounded-[0.625rem] text-xs font-medium transition-all duration-300 ${
+            selectedProvider === 'cloud'
+              ? 'btn-primary shadow-md'
+              : 'text-red-600/70 hover:bg-red-100/50'
+          }`}
+        >
+          Cloud
+        </button>
+        <button
+          onClick={() => setSelectedProvider('ollama')}
+          className={`flex-1 px-3 py-2 rounded-[0.625rem] text-xs font-medium transition-all duration-300 ${
+            selectedProvider === 'ollama'
+              ? 'btn-primary shadow-md'
+              : 'text-red-600/70 hover:bg-red-100/50'
+          }`}
+        >
+          Local
+        </button>
       </div>
 
-      {/* Provider-specific settings */}
-      {selectedProvider === 'gemini' ? (
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-gray-700">Gemini API Key (optional if already set)</label>
-          <input
-            type="password"
-            placeholder="Enter API key to update..."
-            value={geminiApiKey}
-            onChange={(e) => setGeminiApiKey(e.target.value)}
-            className="w-full px-3 py-2 text-xs bg-white/40 border border-white/60 rounded focus:outline-none focus:ring-2 focus:ring-blue-400/60"
-          />
-        </div>
-      ) : (
-        <div className="space-y-2">
-          <div>
-            <label className="text-xs font-medium text-gray-700">Ollama URL</label>
-            <input
-              type="url"
-              value={ollamaUrl}
-              onChange={(e) => setOllamaUrl(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-white/40 border border-white/60 rounded focus:outline-none focus:ring-2 focus:ring-green-400/60"
-            />
-          </div>
-          
-          <div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-medium text-gray-700">Model</label>
-              <button
-                onClick={loadOllamaModels}
-                className="px-2 py-1 text-xs bg-white/60 hover:bg-white/80 rounded transition-all"
-                title="Refresh models"
-              >
-                🔄
-              </button>
-            </div>
-            
-            {availableOllamaModels.length > 0 ? (
+      {/* Provider-specific Options */}
+      <div className="glass-content space-y-2.5 animate-fade-in" key={selectedProvider}>
+        {selectedProvider === 'cloud' ? (
+          <>
+            <div>
+              <label className="text-[11px] font-semibold text-red-800/70 block mb-1.5 uppercase tracking-wider">
+                Cloud Model
+              </label>
               <select
-                value={selectedOllamaModel}
-                onChange={(e) => setSelectedOllamaModel(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-white/40 border border-white/60 rounded focus:outline-none focus:ring-2 focus:ring-green-400/60"
+                value={selectedCloudModel}
+                onChange={(e) => setSelectedCloudModel(e.target.value)}
+                className="glass-input w-full px-3 py-2.5 text-xs"
               >
-                {availableOllamaModels.map((model) => (
-                  <option key={model} value={model}>
-                    {model}
-                  </option>
+                {CLOUD_MODELS.map((model) => (
+                  <option key={model} value={model}>{model}</option>
                 ))}
               </select>
-            ) : (
-              <div className="text-xs text-gray-600 bg-yellow-100/60 p-2 rounded">
-                No Ollama models found. Make sure Ollama is running and models are installed.
+            </div>
+            <div className="text-[10px] text-red-600/60 bg-red-50/60 rounded-lg p-2.5 border border-red-200/20 leading-relaxed">
+              Cloud models route via your local Ollama daemon. Run <span className="font-mono text-red-700/70">ollama login</span> first.
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <label className="text-[11px] font-semibold text-red-800/70 block mb-1.5 uppercase tracking-wider">
+                Ollama URL
+              </label>
+              <input
+                type="url"
+                value={ollamaUrl}
+                onChange={(e) => setOllamaUrl(e.target.value)}
+                className="glass-input w-full px-3 py-2.5 text-xs"
+              />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-1.5">
+                <label className="text-[11px] font-semibold text-red-800/70 uppercase tracking-wider">Model</label>
+                <button
+                  onClick={loadLocalModels}
+                  className="text-[10px] text-red-500/70 hover:text-red-600 transition-colors duration-200"
+                  title="Refresh models"
+                >
+                  Refresh
+                </button>
               </div>
-            )}
-          </div>
-        </div>
-      )}
+              {localModels.length > 0 ? (
+                <select
+                  value={selectedLocalModel}
+                  onChange={(e) => setSelectedLocalModel(e.target.value)}
+                  className="glass-input w-full px-3 py-2.5 text-xs"
+                >
+                  {localModels.map((model) => (
+                    <option key={model} value={model}>{model}</option>
+                  ))}
+                </select>
+              ) : (
+                <div className="text-xs text-red-600/60 bg-red-50/60 p-2.5 rounded-lg border border-red-200/20">
+                  No local models found. Make sure Ollama is running.
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
 
-      {/* Action buttons */}
-      <div className="flex gap-2 pt-2">
+      {/* Action Buttons */}
+      <div className="flex gap-2 glass-content">
         <button
-          onClick={handleProviderSwitch}
+          onClick={handleApply}
           disabled={connectionStatus === 'testing'}
-          className="flex-1 px-3 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white text-xs rounded transition-all shadow-md"
+          className="btn-primary flex-1 px-3 py-2.5 text-xs rounded-xl disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
         >
-          {connectionStatus === 'testing' ? 'Switching...' : 'Apply Changes'}
+          {connectionStatus === 'testing' ? 'Applying...' : 'Apply'}
         </button>
-        
         <button
           onClick={testConnection}
           disabled={connectionStatus === 'testing'}
-          className="px-3 py-2 bg-gray-500 hover:bg-gray-600 disabled:bg-gray-400 text-white text-xs rounded transition-all shadow-md"
+          className="glass-btn px-3 py-2.5 text-xs rounded-xl bg-red-100/60 border-red-200/30 text-red-700/80 hover:bg-red-200/60 hover:text-red-800 disabled:opacity-40"
         >
           Test
         </button>
-      </div>
-
-      {/* Help text */}
-      <div className="text-xs text-gray-600 space-y-1">
-        <div>💡 <strong>Gemini:</strong> Fast, cloud-based, requires API key</div>
-        <div>💡 <strong>Ollama:</strong> Private, local, requires Ollama installation</div>
       </div>
     </div>
   );

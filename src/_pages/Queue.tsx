@@ -28,13 +28,14 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
   const contentRef = useRef<HTMLDivElement>(null)
 
   const [chatInput, setChatInput] = useState("")
-  const [chatMessages, setChatMessages] = useState<{role: "user"|"gemini", text: string}[]>([])
+  const [chatMessages, setChatMessages] = useState<{role: "user"|"ai", text: string}[]>([])
   const [chatLoading, setChatLoading] = useState(false)
   const [isChatOpen, setIsChatOpen] = useState(false)
   const chatInputRef = useRef<HTMLInputElement>(null)
-  
+  const chatEndRef = useRef<HTMLDivElement>(null)
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
-  const [currentModel, setCurrentModel] = useState<{ provider: string; model: string }>({ provider: "gemini", model: "gemini-3-pro-preview" })
+  const [currentModel, setCurrentModel] = useState<{ provider: string; model: string }>({ provider: "ollama", model: "mixtral:8x7b" })
 
   const barRef = useRef<HTMLDivElement>(null)
 
@@ -92,15 +93,20 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     setChatLoading(true)
     setChatInput("")
     try {
-      const response = await window.electronAPI.invoke("gemini-chat", chatInput)
-      setChatMessages((msgs) => [...msgs, { role: "gemini", text: response }])
+      const response = await window.electronAPI.invoke("ai-chat", chatInput)
+      setChatMessages((msgs) => [...msgs, { role: "ai", text: response }])
     } catch (err) {
-      setChatMessages((msgs) => [...msgs, { role: "gemini", text: "Error: " + String(err) }])
+      setChatMessages((msgs) => [...msgs, { role: "ai", text: "Error: " + String(err) }])
     } finally {
       setChatLoading(false)
       chatInputRef.current?.focus()
     }
   }
+
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatMessages, chatLoading])
 
   // Load current model configuration on mount
   useEffect(() => {
@@ -165,22 +171,17 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
 
   // Seamless screenshot-to-LLM flow
   useEffect(() => {
-    // Listen for screenshot taken event
     const unsubscribe = window.electronAPI.onScreenshotTaken(async (data) => {
-      // Refetch screenshots to update the queue
       await refetch();
-      // Show loading in chat
       setChatLoading(true);
       try {
-        // Get the latest screenshot path
         const latest = data?.path || (Array.isArray(data) && data.length > 0 && data[data.length - 1]?.path);
         if (latest) {
-          // Call the LLM to process the screenshot
           const response = await window.electronAPI.invoke("analyze-image-file", latest);
-          setChatMessages((msgs) => [...msgs, { role: "gemini", text: response.text }]);
+          setChatMessages((msgs) => [...msgs, { role: "ai", text: response.text }]);
         }
       } catch (err) {
-        setChatMessages((msgs) => [...msgs, { role: "gemini", text: "Error: " + String(err) }]);
+        setChatMessages((msgs) => [...msgs, { role: "ai", text: "Error: " + String(err) }]);
       } finally {
         setChatLoading(false);
       }
@@ -203,13 +204,11 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     setIsSettingsOpen(!isSettingsOpen)
   }
 
-  const handleModelChange = (provider: "ollama" | "gemini", model: string) => {
+  const handleModelChange = (provider: "ollama" | "cloud", model: string) => {
     setCurrentModel({ provider, model })
-    // Update chat messages to reflect the model change
-    const modelName = provider === "ollama" ? model : "Gemini 3 Pro"
-    setChatMessages((msgs) => [...msgs, { 
-      role: "gemini", 
-      text: `🔄 Switched to ${provider === "ollama" ? "🏠" : "☁️"} ${modelName}. Ready for your questions!` 
+    setChatMessages((msgs) => [...msgs, {
+      role: "ai",
+      text: `Switched to ${model}. Ready for your questions!`
     }])
   }
 
@@ -225,7 +224,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
       className="select-none"
     >
       <div className="bg-transparent w-full">
-        <div className="px-2 py-1">
+        <div className="px-2 py-1.5">
           <Toast
             open={toastOpen}
             onOpenChange={setToastOpen}
@@ -243,85 +242,83 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
               onSettingsToggle={handleSettingsToggle}
             />
           </div>
-          {/* Conditional Settings Interface */}
+          {/* Settings Panel */}
           {isSettingsOpen && (
-            <div className="mt-4 w-full mx-auto">
+            <div className="mt-3 w-full mx-auto animate-slide-up">
               <ModelSelector onModelChange={handleModelChange} onChatOpen={() => setIsChatOpen(true)} />
             </div>
           )}
-          
-          {/* Conditional Chat Interface */}
+
+          {/* Chat Interface */}
           {isChatOpen && (
-            <div className="mt-4 w-full mx-auto liquid-glass chat-container p-4 flex flex-col">
-            <div className="flex-1 overflow-y-auto mb-3 p-3 rounded-lg bg-white/10 backdrop-blur-md max-h-64 min-h-[120px] glass-content border border-white/20 shadow-lg">
-              {chatMessages.length === 0 ? (
-                <div className="text-sm text-gray-600 text-center mt-8">
-                  💬 Chat with {currentModel.provider === "ollama" ? "🏠" : "☁️"} {currentModel.model}
-                  <br />
-                  <span className="text-xs text-gray-500">Take a screenshot (Cmd+H) for automatic analysis</span>
-                  <br />
-                  <span className="text-xs text-gray-500">Click ⚙️ Models to switch AI providers</span>
-                </div>
-              ) : (
-                chatMessages.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`w-full flex ${msg.role === "user" ? "justify-end" : "justify-start"} mb-3`}
-                  >
-                    <div
-                      className={`max-w-[80%] px-3 py-1.5 rounded-xl text-xs shadow-md backdrop-blur-sm border ${
-                        msg.role === "user" 
-                          ? "bg-gray-700/80 text-gray-100 ml-12 border-gray-600/40" 
-                          : "bg-white/85 text-gray-700 mr-12 border-gray-200/50"
-                      }`}
-                      style={{ wordBreak: "break-word", lineHeight: "1.4" }}
-                    >
-                      {msg.text}
+            <div className="mt-3 w-full mx-auto liquid-glass chat-container p-4 flex flex-col">
+              {/* Messages Area */}
+              <div className="flex-1 overflow-y-auto mb-3 p-3 rounded-xl glass-content max-h-64 min-h-[120px] border border-red-200/30 bg-white/50 shadow-inner">
+                {chatMessages.length === 0 ? (
+                  <div className="text-center mt-6 space-y-2 animate-fade-in">
+                    <div className="text-sm text-red-800/60 font-medium tracking-tight">
+                      {currentModel.model}
+                    </div>
+                    <div className="text-[11px] text-red-600/40">
+                      Ctrl+Shift+H to screenshot &middot; Models to switch
                     </div>
                   </div>
-                ))
-              )}
-              {chatLoading && (
-                <div className="flex justify-start mb-3">
-                  <div className="bg-white/85 text-gray-600 px-3 py-1.5 rounded-xl text-xs backdrop-blur-sm border border-gray-200/50 shadow-md mr-12">
-                    <span className="inline-flex items-center">
-                      <span className="animate-pulse text-gray-400">●</span>
-                      <span className="animate-pulse animation-delay-200 text-gray-400">●</span>
-                      <span className="animate-pulse animation-delay-400 text-gray-400">●</span>
-                      <span className="ml-2">{currentModel.model} is replying...</span>
-                    </span>
+                ) : (
+                  chatMessages.map((msg, idx) => (
+                    <div
+                      key={idx}
+                      className={`w-full flex ${msg.role === "user" ? "justify-end" : "justify-start"} mb-2.5 animate-slide-up`}
+                      style={{ animationDelay: '0ms' }}
+                    >
+                      <div
+                        className={`max-w-[80%] px-3.5 py-2.5 text-[12.5px] leading-relaxed ${
+                          msg.role === "user"
+                            ? "chat-bubble-user ml-8"
+                            : "chat-bubble-ai mr-8"
+                        }`}
+                        style={{ wordBreak: "break-word" }}
+                      >
+                        {msg.text}
+                      </div>
+                    </div>
+                  ))
+                )}
+                {chatLoading && (
+                  <div className="flex justify-start mb-2 animate-fade-in">
+                    <div className="chat-bubble-ai px-4 py-3 mr-8">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="loading-dot w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
+                        <span className="loading-dot w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
+                        <span className="loading-dot w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
+                      </span>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+                <div ref={chatEndRef} />
+              </div>
+              {/* Input Area */}
+              <form className="flex gap-2 items-center glass-content" onSubmit={e => { e.preventDefault(); handleChatSend(); }}>
+                <input
+                  ref={chatInputRef}
+                  className="glass-input flex-1 px-3.5 py-2.5 text-xs"
+                  placeholder="Ask anything..."
+                  value={chatInput}
+                  onChange={e => setChatInput(e.target.value)}
+                  disabled={chatLoading}
+                />
+                <button
+                  type="submit"
+                  className="btn-primary p-2.5 rounded-xl flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none"
+                  disabled={chatLoading || !chatInput.trim()}
+                  tabIndex={-1}
+                  aria-label="Send"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="white" className="w-3.5 h-3.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-7.5-15-7.5v6l10 1.5-10 1.5v6z" />
+                  </svg>
+                </button>
+              </form>
             </div>
-            <form
-              className="flex gap-2 items-center glass-content"
-              onSubmit={e => {
-                e.preventDefault();
-                handleChatSend();
-              }}
-            >
-              <input
-                ref={chatInputRef}
-                className="flex-1 rounded-lg px-3 py-2 bg-white/25 backdrop-blur-md text-gray-800 placeholder-gray-500 text-xs focus:outline-none focus:ring-1 focus:ring-gray-400/60 border border-white/40 shadow-lg transition-all duration-200"
-                placeholder="Type your message..."
-                value={chatInput}
-                onChange={e => setChatInput(e.target.value)}
-                disabled={chatLoading}
-              />
-              <button
-                type="submit"
-                className="p-2 rounded-lg bg-gray-600/80 hover:bg-gray-700/80 border border-gray-500/60 flex items-center justify-center transition-all duration-200 backdrop-blur-sm shadow-lg disabled:opacity-50"
-                disabled={chatLoading || !chatInput.trim()}
-                tabIndex={-1}
-                aria-label="Send"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="white" className="w-4 h-4">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-7.5-15-7.5v6l10 1.5-10 1.5v6z" />
-                </svg>
-              </button>
-            </form>
-          </div>
           )}
         </div>
       </div>

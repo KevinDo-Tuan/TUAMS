@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage } from "electron"
+import { app, BrowserWindow, Tray, Menu, nativeImage, powerMonitor } from "electron"
 import { initializeIpcHandlers } from "./ipcHandlers"
 import { WindowHelper } from "./WindowHelper"
 import { ScreenshotHelper } from "./ScreenshotHelper"
@@ -118,12 +118,6 @@ export class AppState {
   }
 
   public toggleMainWindow(): void {
-    console.log(
-      "Screenshots: ",
-      this.screenshotHelper.getScreenshotQueue().length,
-      "Extra screenshots: ",
-      this.screenshotHelper.getExtraScreenshotQueue().length
-    )
     this.windowHelper.toggleMainWindow()
   }
 
@@ -298,6 +292,18 @@ async function initializeApp() {
 
   app.dock?.hide() // Hide dock icon (optional)
   app.commandLine.appendSwitch("disable-background-timer-throttling")
+
+  // Re-register shortcuts after system sleep/lock, as Windows drops them on resume
+  app.whenReady().then(() => {
+    powerMonitor.on("resume", () => {
+      console.log("[App] System resumed — re-registering shortcuts")
+      appState.shortcutsHelper.reregisterShortcuts()
+    })
+    powerMonitor.on("unlock-screen", () => {
+      console.log("[App] Screen unlocked — re-registering shortcuts")
+      appState.shortcutsHelper.reregisterShortcuts()
+    })
+  })
 }
 
 // Start the application

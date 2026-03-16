@@ -44,29 +44,25 @@ const CodeComparisonSection = ({
     // Normalize line endings and clean up the code
     const normalizeCode = (code: string) => {
       return code
-        .replace(/\r\n/g, "\n") // Convert Windows line endings to Unix
-        .replace(/\r/g, "\n") // Convert remaining carriage returns
-        .trim() // Remove leading/trailing whitespace
+        .replace(/\r\n/g, "\n")
+        .replace(/\r/g, "\n")
+        .trim()
     }
 
     const normalizedOldCode = normalizeCode(oldCode)
     const normalizedNewCode = normalizeCode(newCode)
 
-    // Generate the diff
     const diff = diffLines(normalizedOldCode, normalizedNewCode, {
       newlineIsToken: true,
-      ignoreWhitespace: true // Changed to true to better handle whitespace differences
+      ignoreWhitespace: true
     })
 
-    // Process the diff to create parallel arrays
     const leftLines: DiffLine[] = []
     const rightLines: DiffLine[] = []
 
     diff.forEach((part) => {
       if (part.added) {
-        // Add empty lines to left side
         leftLines.push(...Array(part.count || 0).fill({ value: "" }))
-        // Add new lines to right side, filter out empty lines at the end
         rightLines.push(
           ...part.value
             .split("\n")
@@ -77,7 +73,6 @@ const CodeComparisonSection = ({
             }))
         )
       } else if (part.removed) {
-        // Add removed lines to left side, filter out empty lines at the end
         leftLines.push(
           ...part.value
             .split("\n")
@@ -87,10 +82,8 @@ const CodeComparisonSection = ({
               removed: true
             }))
         )
-        // Add empty lines to right side
         rightLines.push(...Array(part.count || 0).fill({ value: "" }))
       } else {
-        // Add unchanged lines to both sides
         const lines = part.value.split("\n").filter((line) => line.length > 0)
         leftLines.push(...lines.map((line) => ({ value: line })))
         rightLines.push(...lines.map((line) => ({ value: line })))
@@ -103,28 +96,28 @@ const CodeComparisonSection = ({
   const { leftLines, rightLines } = computeDiff()
 
   return (
-    <div className="space-y-1.5">
-      <h2 className="text-[13px] font-medium text-white tracking-wide">
+    <div className="space-y-2.5 animate-fade-in">
+      <h2 className="text-[13px] font-semibold text-red-200/90 tracking-wide uppercase text-[11px]">
         Code Comparison
       </h2>
       {isLoading ? (
         <div className="space-y-1">
           <div className="mt-3 flex">
-            <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
+            <p className="text-xs bg-gradient-to-r from-red-300/80 via-white to-red-300/80 bg-[length:200%_100%] bg-clip-text text-transparent animate-text-gradient-wave">
               Loading code comparison...
             </p>
           </div>
         </div>
       ) : (
-        <div className="flex flex-row gap-0.5 bg-[#161b22] rounded-lg overflow-hidden">
+        <div className="flex flex-row gap-px code-block-wrapper">
           {/* Previous Code */}
-          <div className="w-1/2 border-r border-gray-700">
-            <div className="bg-[#2d333b] px-3 py-1.5">
-              <h3 className="text-[11px] font-medium text-gray-200">
+          <div className="w-1/2 border-r border-red-900/20">
+            <div className="bg-red-950/40 px-3 py-2 border-b border-red-900/20">
+              <h3 className="text-[11px] font-medium text-red-200/70">
                 Previous Version
               </h3>
             </div>
-            <div className="p-3 overflow-x-auto">
+            <div className="overflow-x-auto">
               <SyntaxHighlighter
                 language="python"
                 style={dracula}
@@ -133,7 +126,9 @@ const CodeComparisonSection = ({
                   margin: 0,
                   padding: "1rem",
                   whiteSpace: "pre-wrap",
-                  wordBreak: "break-all"
+                  wordBreak: "break-all",
+                  background: "hsla(220, 40%, 6%, 0.7)",
+                  borderRadius: 0
                 }}
                 wrapLines={true}
                 showLineNumbers={true}
@@ -143,7 +138,7 @@ const CodeComparisonSection = ({
                     style: {
                       display: "block",
                       backgroundColor: line?.removed
-                        ? "rgba(139, 0, 0, 0.2)"
+                        ? "rgba(220, 38, 38, 0.12)"
                         : "transparent"
                     }
                   }
@@ -156,12 +151,12 @@ const CodeComparisonSection = ({
 
           {/* New Code */}
           <div className="w-1/2">
-            <div className="bg-[#2d333b] px-3 py-1.5">
-              <h3 className="text-[11px] font-medium text-gray-200">
+            <div className="bg-red-950/40 px-3 py-2 border-b border-red-900/20">
+              <h3 className="text-[11px] font-medium text-red-200/70">
                 New Version
               </h3>
             </div>
-            <div className="p-3 overflow-x-auto">
+            <div className="overflow-x-auto">
               <SyntaxHighlighter
                 language="python"
                 style={dracula}
@@ -170,7 +165,9 @@ const CodeComparisonSection = ({
                   margin: 0,
                   padding: "1rem",
                   whiteSpace: "pre-wrap",
-                  wordBreak: "break-all"
+                  wordBreak: "break-all",
+                  background: "hsla(220, 40%, 6%, 0.7)",
+                  borderRadius: 0
                 }}
                 wrapLines={true}
                 showLineNumbers={true}
@@ -180,7 +177,7 @@ const CodeComparisonSection = ({
                     style: {
                       display: "block",
                       backgroundColor: line?.added
-                        ? "rgba(0, 139, 0, 0.2)"
+                        ? "rgba(34, 197, 94, 0.12)"
                         : "transparent"
                     }
                   }
@@ -277,7 +274,6 @@ const Debug: React.FC<DebugProps> = ({ isProcessing, setIsProcessing }) => {
       space_complexity: string
     } | null
 
-    // If we have cached data, set all state variables to the cached data
     if (newSolution) {
       setOldCode(newSolution.old_code || null)
       setNewCode(newSolution.new_code || null)
@@ -292,7 +288,7 @@ const Debug: React.FC<DebugProps> = ({ isProcessing, setIsProcessing }) => {
       window.electronAPI.onScreenshotTaken(() => refetch()),
       window.electronAPI.onResetView(() => refetch()),
       window.electronAPI.onDebugSuccess(() => {
-        setIsProcessing(false) //all the other stuff ahapepns in the parent component, so we just need to do this.
+        setIsProcessing(false)
       }),
       window.electronAPI.onDebugStart(() => {
         setIsProcessing(true)
@@ -341,7 +337,7 @@ const Debug: React.FC<DebugProps> = ({ isProcessing, setIsProcessing }) => {
   }
 
   return (
-    <div ref={contentRef} className="relative space-y-3 px-4 py-3 ">
+    <div ref={contentRef} className="relative space-y-3 px-4 py-3 animate-fade-in">
       <Toast
         open={toastOpen}
         onOpenChange={setToastOpen}
@@ -352,7 +348,7 @@ const Debug: React.FC<DebugProps> = ({ isProcessing, setIsProcessing }) => {
         <ToastDescription>{toastMessage.description}</ToastDescription>
       </Toast>
 
-      {/* Conditionally render the screenshot queue */}
+      {/* Screenshot queue */}
       <div className="bg-transparent w-fit">
         <div className="pb-3">
           <div className="space-y-3 w-fit">
@@ -365,26 +361,30 @@ const Debug: React.FC<DebugProps> = ({ isProcessing, setIsProcessing }) => {
         </div>
       </div>
 
-      {/* Navbar of commands with the tooltip */}
+      {/* Command bar */}
       <ExtraScreenshotsQueueHelper
         extraScreenshots={extraScreenshots}
         onTooltipVisibilityChange={handleTooltipVisibilityChange}
       />
 
       {/* Main Content */}
-      <div className="w-full text-sm text-black bg-black/60 rounded-md">
+      <div className="w-full text-sm dark-panel">
         <div className="rounded-lg overflow-hidden">
-          <div className="px-4 py-3 space-y-4">
+          <div className="px-5 py-4 space-y-5">
             {/* Thoughts Section */}
             <ContentSection
               title="What I Changed"
               content={
                 thoughtsData && (
                   <div className="space-y-3">
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       {thoughtsData.map((thought, index) => (
-                        <div key={index} className="flex items-start gap-2">
-                          <div className="w-1 h-1 rounded-full bg-blue-400/80 mt-2 shrink-0" />
+                        <div
+                          key={index}
+                          className="flex items-start gap-2.5 animate-fade-in"
+                          style={{ animationDelay: `${index * 80}ms`, animationFillMode: 'both' }}
+                        >
+                          <div className="w-1.5 h-1.5 rounded-full bg-red-400/70 mt-1.5 shrink-0" />
                           <div>{thought}</div>
                         </div>
                       ))}
@@ -395,12 +395,16 @@ const Debug: React.FC<DebugProps> = ({ isProcessing, setIsProcessing }) => {
               isLoading={!thoughtsData}
             />
 
+            <div className="section-divider" />
+
             {/* Code Comparison Section */}
             <CodeComparisonSection
               oldCode={oldCode}
               newCode={newCode}
               isLoading={!oldCode || !newCode}
             />
+
+            <div className="section-divider" />
 
             {/* Complexity Section */}
             <ComplexitySection

@@ -28,18 +28,18 @@ export const ContentSection = ({
   content: React.ReactNode
   isLoading: boolean
 }) => (
-  <div className="space-y-2">
-    <h2 className="text-[13px] font-medium text-white tracking-wide">
+  <div className="space-y-2.5 animate-fade-in">
+    <h2 className="text-[13px] font-semibold text-red-200/90 tracking-wide uppercase text-[11px]">
       {title}
     </h2>
     {isLoading ? (
       <div className="mt-4 flex">
-        <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
+        <p className="text-xs bg-gradient-to-r from-red-300/80 via-white to-red-300/80 bg-[length:200%_100%] bg-clip-text text-transparent animate-text-gradient-wave">
           Extracting problem statement...
         </p>
       </div>
     ) : (
-      <div className="text-[13px] leading-[1.4] text-gray-100 max-w-[600px]">
+      <div className="text-[13px] leading-relaxed text-gray-200/90 max-w-[600px]">
         {content}
       </div>
     )}
@@ -54,20 +54,20 @@ const SolutionSection = ({
   content: React.ReactNode
   isLoading: boolean
 }) => (
-  <div className="space-y-2">
-    <h2 className="text-[13px] font-medium text-white tracking-wide">
+  <div className="space-y-2.5 animate-fade-in">
+    <h2 className="text-[13px] font-semibold text-red-200/90 tracking-wide uppercase text-[11px]">
       {title}
     </h2>
     {isLoading ? (
       <div className="space-y-1.5">
         <div className="mt-4 flex">
-          <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
+          <p className="text-xs bg-gradient-to-r from-red-300/80 via-white to-red-300/80 bg-[length:200%_100%] bg-clip-text text-transparent animate-text-gradient-wave">
             Loading solutions...
           </p>
         </div>
       </div>
     ) : (
-      <div className="w-full">
+      <div className="w-full code-block-wrapper">
         <SyntaxHighlighter
           showLineNumbers
           language="python"
@@ -77,7 +77,9 @@ const SolutionSection = ({
             margin: 0,
             padding: "1rem",
             whiteSpace: "pre-wrap",
-            wordBreak: "break-all"
+            wordBreak: "break-all",
+            background: "hsla(220, 40%, 6%, 0.7)",
+            borderRadius: 0
           }}
           wrapLongLines={true}
         >
@@ -97,25 +99,25 @@ export const ComplexitySection = ({
   spaceComplexity: string | null
   isLoading: boolean
 }) => (
-  <div className="space-y-2">
-    <h2 className="text-[13px] font-medium text-white tracking-wide">
+  <div className="space-y-2.5 animate-fade-in">
+    <h2 className="text-[13px] font-semibold text-red-200/90 tracking-wide uppercase text-[11px]">
       Complexity (Updated)
     </h2>
     {isLoading ? (
-      <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
+      <p className="text-xs bg-gradient-to-r from-red-300/80 via-white to-red-300/80 bg-[length:200%_100%] bg-clip-text text-transparent animate-text-gradient-wave">
         Calculating complexity...
       </p>
     ) : (
-      <div className="space-y-1">
-        <div className="flex items-start gap-2 text-[13px] leading-[1.4] text-gray-100">
-          <div className="w-1 h-1 rounded-full bg-blue-400/80 mt-2 shrink-0" />
-          <div>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2.5 text-[13px] leading-relaxed text-gray-200/90">
+          <div className="complexity-badge">
+            <div className="w-1.5 h-1.5 rounded-full bg-red-400" />
             <strong>Time:</strong> {timeComplexity}
           </div>
         </div>
-        <div className="flex items-start gap-2 text-[13px] leading-[1.4] text-gray-100">
-          <div className="w-1 h-1 rounded-full bg-blue-400/80 mt-2 shrink-0" />
-          <div>
+        <div className="flex items-center gap-2.5 text-[13px] leading-relaxed text-gray-200/90">
+          <div className="complexity-badge">
+            <div className="w-1.5 h-1.5 rounded-full bg-red-400" />
             <strong>Space:</strong> {spaceComplexity}
           </div>
         </div>
@@ -195,7 +197,7 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
       )
 
       if (response.success) {
-        refetch() // Refetch screenshots instead of managing state directly
+        refetch()
       } else {
         console.error("Failed to delete extra screenshot:", response.error)
       }
@@ -312,7 +314,7 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
           space_complexity: string
         } | null
         if (!solution) {
-          setView("queue") //make sure that this is correct. or like make sure there's a toast or something
+          setView("queue")
         }
         setSolutionData(solution?.code || null)
         setThoughtsData(solution?.thoughts || null)
@@ -347,17 +349,14 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
       //DEBUG EVENTS
       //########################################################
       window.electronAPI.onDebugStart(() => {
-        //we'll set the debug processing state to true and use that to render a little loader
         setDebugProcessing(true)
       }),
-      //the first time debugging works, we'll set the view to debug and populate the cache with the data
       window.electronAPI.onDebugSuccess((data) => {
         console.log({ debug_data: data })
 
         queryClient.setQueryData(["new_solution"], data.solution)
         setDebugProcessing(false)
       }),
-      //when there was an error in the initial debugging, we'll show a toast and stop the little generating pulsing thing.
       window.electronAPI.onDebugError(() => {
         showToast(
           "Processing Failed",
@@ -392,10 +391,8 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
         setProblemStatementData(
           queryClient.getQueryData(["problem_statement"]) || null
         )
-        // If this is from audio processing, show it in the custom content section
         const audioResult = queryClient.getQueryData(["audio_result"]) as AudioResult | undefined;
         if (audioResult) {
-          // Update all relevant sections when audio result is received
           setProblemStatementData({
             problem_statement: audioResult.text,
             input_format: {
@@ -415,7 +412,7 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
             validation_type: "manual",
             difficulty: "custom"
           });
-          setSolutionData(null); // Reset solution to trigger loading state
+          setSolutionData(null);
           setThoughtsData(null);
           setTimeComplexityData(null);
           setSpaceComplexityData(null);
@@ -453,7 +450,7 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
           />
         </>
       ) : (
-        <div ref={contentRef} className="relative space-y-3 px-4 py-3">
+        <div ref={contentRef} className="relative space-y-3 px-4 py-3 animate-fade-in">
           <Toast
             open={toastOpen}
             onOpenChange={setToastOpen}
@@ -464,9 +461,9 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
             <ToastDescription>{toastMessage.description}</ToastDescription>
           </Toast>
 
-          {/* Conditionally render the screenshot queue if solutionData is available */}
+          {/* Screenshot queue */}
           {solutionData && (
-            <div className="bg-transparent w-fit">
+            <div className="bg-transparent w-fit animate-slide-up">
               <div className="pb-3">
                 <div className="space-y-3 w-fit">
                   <ScreenshotQueue
@@ -479,16 +476,16 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
             </div>
           )}
 
-          {/* Navbar of commands with the SolutionsHelper */}
+          {/* Command bar */}
           <SolutionCommands
             extraScreenshots={extraScreenshots}
             onTooltipVisibilityChange={handleTooltipVisibilityChange}
           />
 
-          {/* Main Content - Modified width constraints */}
-          <div className="w-full text-sm text-black bg-black/60 rounded-md">
+          {/* Main Content */}
+          <div className="w-full text-sm dark-panel">
             <div className="rounded-lg overflow-hidden">
-              <div className="px-4 py-3 space-y-4 max-w-full">
+              <div className="px-5 py-4 space-y-5 max-w-full">
                 {/* Show Screenshot or Audio Result as main output if validation_type is manual */}
                 {problemStatementData?.validation_type === "manual" ? (
                   <ContentSection
@@ -498,37 +495,42 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
                   />
                 ) : (
                   <>
-                    {/* Problem Statement Section - Only for non-manual */}
+                    {/* Problem Statement Section */}
                     <ContentSection
                       title={problemStatementData?.output_format?.subtype === "voice" ? "Voice Input" : "Problem Statement"}
                       content={problemStatementData?.problem_statement}
                       isLoading={!problemStatementData}
                     />
-                    {/* Show loading state when waiting for solution */}
+
+                    {/* Loading state */}
                     {problemStatementData && !solutionData && (
                       <div className="mt-4 flex">
-                        <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
-                          {problemStatementData?.output_format?.subtype === "voice" 
-                            ? "Processing voice input..." 
+                        <p className="text-xs bg-gradient-to-r from-red-300/80 via-white to-red-300/80 bg-[length:200%_100%] bg-clip-text text-transparent animate-text-gradient-wave">
+                          {problemStatementData?.output_format?.subtype === "voice"
+                            ? "Processing voice input..."
                             : "Generating solutions..."}
                         </p>
                       </div>
                     )}
-                    {/* Solution Sections (legacy, only for non-manual) */}
+
+                    {/* Solution Sections */}
                     {solutionData && (
                       <>
+                        <div className="section-divider" />
+
                         <ContentSection
                           title="Analysis"
                           content={
                             thoughtsData && (
                               <div className="space-y-3">
-                                <div className="space-y-1">
+                                <div className="space-y-1.5">
                                   {thoughtsData.map((thought, index) => (
                                     <div
                                       key={index}
-                                      className="flex items-start gap-2"
+                                      className="flex items-start gap-2.5 animate-fade-in"
+                                      style={{ animationDelay: `${index * 80}ms`, animationFillMode: 'both' }}
                                     >
-                                      <div className="w-1 h-1 rounded-full bg-blue-400/80 mt-2 shrink-0" />
+                                      <div className="w-1.5 h-1.5 rounded-full bg-red-400/70 mt-1.5 shrink-0" />
                                       <div>{thought}</div>
                                     </div>
                                   ))}
@@ -538,17 +540,23 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
                           }
                           isLoading={!thoughtsData}
                         />
+
+                        <div className="section-divider" />
+
                         <SolutionSection
                           title={problemStatementData?.output_format?.subtype === "voice" ? "Response" : "Solution"}
                           content={solutionData}
                           isLoading={!solutionData}
                         />
                         {problemStatementData?.output_format?.subtype !== "voice" && (
-                          <ComplexitySection
-                            timeComplexity={timeComplexityData}
-                            spaceComplexity={spaceComplexityData}
-                            isLoading={!timeComplexityData || !spaceComplexityData}
-                          />
+                          <>
+                            <div className="section-divider" />
+                            <ComplexitySection
+                              timeComplexity={timeComplexityData}
+                              spaceComplexity={spaceComplexityData}
+                              isLoading={!timeComplexityData || !spaceComplexityData}
+                            />
+                          </>
                         )}
                       </>
                     )}
