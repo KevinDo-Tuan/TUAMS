@@ -138,6 +138,10 @@ export function initializeIpcHandlers(appState: AppState): void {
     appState.centerAndShowWindow()
   })
 
+  ipcMain.handle("set-window-focusable", async (_, focusable: boolean) => {
+    appState.setWindowFocusable(focusable)
+  })
+
   // LLM Model Management Handlers
   ipcMain.handle("get-current-llm-config", async () => {
     try {

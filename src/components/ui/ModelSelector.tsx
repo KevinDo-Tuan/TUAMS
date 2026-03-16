@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 const CLOUD_MODELS = [
   "glm-5:cloud",
@@ -29,6 +29,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ onModelChange, onChatOpen
   const [selectedLocalModel, setSelectedLocalModel] = useState<string>("");
   const [selectedCloudModel, setSelectedCloudModel] = useState<string>(CLOUD_MODELS[0]);
   const [ollamaUrl, setOllamaUrl] = useState<string>("http://localhost:11434");
+  const ollamaUrlRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadCurrentConfig();
@@ -208,10 +209,17 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ onModelChange, onChatOpen
                 Ollama URL
               </label>
               <input
+                ref={ollamaUrlRef}
                 type="url"
                 value={ollamaUrl}
                 onChange={(e) => setOllamaUrl(e.target.value)}
                 className="glass-input w-full px-3 py-2.5 text-xs"
+                onMouseDown={async (e) => {
+                  e.preventDefault()
+                  await window.electronAPI.invoke("set-window-focusable", true)
+                  ollamaUrlRef.current?.focus()
+                }}
+                onBlur={() => window.electronAPI.invoke("set-window-focusable", false)}
               />
             </div>
             <div>

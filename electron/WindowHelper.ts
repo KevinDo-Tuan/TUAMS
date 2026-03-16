@@ -90,7 +90,7 @@ export class WindowHelper {
       fullscreenable: false,
       hasShadow: false,
       backgroundColor: "#00000000",
-      focusable: true,
+      focusable: false,
       resizable: true,
       movable: true,
       x: 100, // Start at a visible position
@@ -106,18 +106,20 @@ export class WindowHelper {
         visibleOnFullScreen: true
       })
       this.mainWindow.setHiddenInMissionControl(true)
-      this.mainWindow.setAlwaysOnTop(true, "floating")
-    }
-    if (process.platform === "linux") {
+      this.mainWindow.setAlwaysOnTop(true, "screen-saver")
+    } else if (process.platform === "linux") {
       // Linux-specific optimizations for better compatibility
       if (this.mainWindow.setHasShadow) {
         this.mainWindow.setHasShadow(false)
       }
       // Keep window focusable on Linux for proper interaction
       this.mainWindow.setFocusable(true)
-    } 
+      this.mainWindow.setAlwaysOnTop(true, "screen-saver")
+    } else {
+      // Windows: use "screen-saver" level to stay above fullscreen apps (e.g. Azota)
+      this.mainWindow.setAlwaysOnTop(true, "screen-saver")
+    }
     this.mainWindow.setSkipTaskbar(true)
-    this.mainWindow.setAlwaysOnTop(true)
 
     this.mainWindow.loadURL(startUrl).catch((err) => {
       console.error("Failed to load URL:", err)
@@ -130,7 +132,7 @@ export class WindowHelper {
         this.centerWindow()
         this.mainWindow.show()
         this.mainWindow.focus()
-        this.mainWindow.setAlwaysOnTop(true)
+        this.mainWindow.setAlwaysOnTop(true, "screen-saver")
         console.log("Window is now visible and centered")
       }
     })
@@ -262,10 +264,18 @@ export class WindowHelper {
     this.centerWindow()
     this.mainWindow.show()
     this.mainWindow.focus()
-    this.mainWindow.setAlwaysOnTop(true)
+    this.mainWindow.setAlwaysOnTop(true, "screen-saver")
     this.isWindowVisible = true
-    
+
     console.log(`Window centered and shown`)
+  }
+
+  public setWindowFocusable(focusable: boolean): void {
+    if (!this.mainWindow) return
+    this.mainWindow.setFocusable(focusable)
+    if (focusable) {
+      this.mainWindow.focus()
+    }
   }
 
   // New methods for window movement

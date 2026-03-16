@@ -135,6 +135,10 @@ export class AppState {
     this.setView("queue")
   }
 
+  public setWindowFocusable(focusable: boolean): void {
+    this.windowHelper.setWindowFocusable(focusable)
+  }
+
   // Screenshot management methods
   public async takeScreenshot(): Promise<string> {
     if (!this.getMainWindow()) throw new Error("No main window available")

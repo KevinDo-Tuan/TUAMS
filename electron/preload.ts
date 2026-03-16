@@ -34,7 +34,8 @@ interface ElectronAPI {
   analyzeAudioFile: (path: string) => Promise<{ text: string; timestamp: number }>
   analyzeImageFile: (path: string) => Promise<void>
   quitApp: () => Promise<void>
-  
+  setWindowFocusable: (focusable: boolean) => Promise<void>
+
   // LLM Model Management
   getCurrentLlmConfig: () => Promise<{ provider: "ollama" | "cloud"; model: string; isOllama: boolean }>
   getAvailableOllamaModels: () => Promise<string[]>
@@ -179,7 +180,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   analyzeAudioFile: (path: string) => ipcRenderer.invoke("analyze-audio-file", path),
   analyzeImageFile: (path: string) => ipcRenderer.invoke("analyze-image-file", path),
   quitApp: () => ipcRenderer.invoke("quit-app"),
-  
+  setWindowFocusable: (focusable: boolean) => ipcRenderer.invoke("set-window-focusable", focusable),
+
   // LLM Model Management
   getCurrentLlmConfig: () => ipcRenderer.invoke("get-current-llm-config"),
   getAvailableOllamaModels: () => ipcRenderer.invoke("get-available-ollama-models"),

@@ -24,7 +24,17 @@ export interface ElectronAPI {
   moveWindowDown: () => Promise<void>
   analyzeAudioFromBase64: (data: string, mimeType: string) => Promise<{ text: string; timestamp: number }>
   analyzeAudioFile: (path: string) => Promise<{ text: string; timestamp: number }>
+  analyzeImageFile: (path: string) => Promise<void>
   quitApp: () => Promise<void>
+  setWindowFocusable: (focusable: boolean) => Promise<void>
+
+  // LLM Model Management
+  getCurrentLlmConfig: () => Promise<{ provider: "ollama" | "cloud"; model: string; isOllama: boolean }>
+  getAvailableOllamaModels: () => Promise<string[]>
+  switchToOllama: (model?: string, url?: string) => Promise<{ success: boolean; error?: string }>
+  switchToCloud: (model?: string) => Promise<{ success: boolean; error?: string }>
+  testLlmConnection: () => Promise<{ success: boolean; error?: string }>
+
   invoke: (channel: string, ...args: any[]) => Promise<any>
 }
 

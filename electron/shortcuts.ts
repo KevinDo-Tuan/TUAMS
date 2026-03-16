@@ -67,14 +67,7 @@ export class ShortcutsHelper {
       this.appState.toggleMainWindow()
       const mainWindow = this.appState.getMainWindow()
       if (mainWindow && !this.appState.isVisible()) {
-        if (process.platform === "darwin") {
-          mainWindow.setAlwaysOnTop(true, "normal")
-          setTimeout(() => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.setAlwaysOnTop(true, "floating")
-            }
-          }, 100)
-        }
+        mainWindow.setAlwaysOnTop(true, "screen-saver")
       }
     })
 
@@ -90,7 +83,7 @@ export class ShortcutsHelper {
     // Also restore the window if it was somehow hidden
     const mainWindow = this.appState.getMainWindow()
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.setAlwaysOnTop(true)
+      mainWindow.setAlwaysOnTop(true, "screen-saver")
     }
   }
 }
