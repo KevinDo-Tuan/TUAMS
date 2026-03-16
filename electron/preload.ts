@@ -24,6 +24,8 @@ interface ElectronAPI {
   onSolutionSuccess: (callback: (data: any) => void) => () => void
 
   onUnauthorized: (callback: () => void) => () => void
+  onFocusChat: (callback: () => void) => () => void
+  onClipboardChat: (callback: (text: string) => void) => () => void
   onDebugError: (callback: (error: string) => void) => () => void
   takeScreenshot: () => Promise<void>
   moveWindowLeft: () => Promise<void>
@@ -43,6 +45,8 @@ interface ElectronAPI {
   switchToCloud: (model?: string) => Promise<{ success: boolean; error?: string }>
   testLlmConnection: () => Promise<{ success: boolean; error?: string }>
   
+  getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>
+  transcribeAudio: (audioBase64: string) => Promise<{ success: boolean; text?: string; error?: string }>
   invoke: (channel: string, ...args: any[]) => Promise<any>
 }
 
@@ -172,6 +176,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.removeListener(PROCESSING_EVENTS.UNAUTHORIZED, subscription)
     }
   },
+  onFocusChat: (callback: () => void) => {
+    const subscription = () => callback()
+    ipcRenderer.on("focus-chat", subscription)
+    return () => { ipcRenderer.removeListener("focus-chat", subscription) }
+  },
+  onClipboardChat: (callback: (text: string) => void) => {
+    const subscription = (_: any, text: string) => callback(text)
+    ipcRenderer.on("clipboard-chat", subscription)
+    return () => { ipcRenderer.removeListener("clipboard-chat", subscription) }
+  },
   moveWindowLeft: () => ipcRenderer.invoke("move-window-left"),
   moveWindowRight: () => ipcRenderer.invoke("move-window-right"),
   moveWindowUp: () => ipcRenderer.invoke("move-window-up"),
@@ -189,5 +203,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   switchToCloud: (model?: string) => ipcRenderer.invoke("switch-to-cloud", model),
   testLlmConnection: () => ipcRenderer.invoke("test-llm-connection"),
   
+  getDesktopSources: () => ipcRenderer.invoke("get-desktop-sources"),
+  transcribeAudio: (audioBase64: string) => ipcRenderer.invoke("transcribe-audio", audioBase64),
   invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args)
 } as ElectronAPI)

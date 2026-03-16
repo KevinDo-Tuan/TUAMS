@@ -2,6 +2,7 @@
 import { BrowserWindow, screen } from "electron"
 import { AppState } from "main"
 import path from "node:path"
+import { execSync } from "child_process"
 
 const isDev = process.env.NODE_ENV === "development"
 
@@ -90,7 +91,7 @@ export class WindowHelper {
       fullscreenable: false,
       hasShadow: false,
       backgroundColor: "#00000000",
-      focusable: false,
+      focusable: true,
       resizable: true,
       movable: true,
       x: 100, // Start at a visible position
@@ -99,7 +100,11 @@ export class WindowHelper {
 
     this.mainWindow = new BrowserWindow(windowSettings)
     // this.mainWindow.webContents.openDevTools()
-    this.mainWindow.setContentProtection(true)
+
+    // Non-Windows: use Electron's content protection (shows black rectangle)
+    if (process.platform !== "win32") {
+      this.mainWindow.setContentProtection(true)
+    }
 
     if (process.platform === "darwin") {
       this.mainWindow.setVisibleOnAllWorkspaces(true, {
@@ -128,11 +133,12 @@ export class WindowHelper {
     // Show window after loading URL and center it
     this.mainWindow.once('ready-to-show', () => {
       if (this.mainWindow) {
-        // Center the window first
         this.centerWindow()
         this.mainWindow.show()
         this.mainWindow.focus()
         this.mainWindow.setAlwaysOnTop(true, "screen-saver")
+        // Apply display affinity AFTER window is visible
+        this.applyDisplayAffinity()
         console.log("Window is now visible and centered")
       }
     })
@@ -174,6 +180,39 @@ export class WindowHelper {
     })
   }
 
+  // WDA_EXCLUDEFROMCAPTURE (0x11) — makes window completely invisible in screen share
+  // Must be called AFTER window is shown; reapply after every show/hide cycle
+  private applyDisplayAffinity(): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+    if (process.platform !== "win32") return
+
+    try {
+      const hwndBuf = this.mainWindow.getNativeWindowHandle()
+      const hwnd = "0x" + hwndBuf.readBigUInt64LE(0).toString(16)
+
+      const psExe = path.join(
+        process.env.SystemRoot || "C:\\Windows",
+        "System32", "WindowsPowerShell", "v1.0", "powershell.exe"
+      )
+      const psScript = `Add-Type 'using System;using System.Runtime.InteropServices;public class WDA{[DllImport("user32.dll")]public static extern bool SetWindowDisplayAffinity(IntPtr h,uint a);}'; [WDA]::SetWindowDisplayAffinity([IntPtr]::new(${hwnd}),0x11)`
+
+      const output = execSync(
+        `"${psExe}" -NoProfile -NonInteractive -Command "${psScript.replace(/"/g, '\\"')}"`,
+        { windowsHide: true, encoding: "utf-8", timeout: 5000 }
+      ).trim()
+
+      if (output === "True") {
+        console.log("[WindowHelper] Display affinity set successfully (WDA_EXCLUDEFROMCAPTURE)")
+      } else {
+        console.warn("[WindowHelper] SetWindowDisplayAffinity returned False, falling back to content protection")
+        this.mainWindow.setContentProtection(true)
+      }
+    } catch (err) {
+      console.error("[WindowHelper] Failed to set display affinity:", err)
+      this.mainWindow.setContentProtection(true)
+    }
+  }
+
   public getMainWindow(): BrowserWindow | null {
     return this.mainWindow
   }
@@ -211,6 +250,7 @@ export class WindowHelper {
     }
 
     this.mainWindow.showInactive()
+    this.applyDisplayAffinity()
 
     this.isWindowVisible = true
   }
@@ -265,6 +305,7 @@ export class WindowHelper {
     this.mainWindow.show()
     this.mainWindow.focus()
     this.mainWindow.setAlwaysOnTop(true, "screen-saver")
+    this.applyDisplayAffinity()
     this.isWindowVisible = true
 
     console.log(`Window centered and shown`)

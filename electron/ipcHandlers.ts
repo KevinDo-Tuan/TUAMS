@@ -1,7 +1,11 @@
 // ipcHandlers.ts
 
-import { ipcMain, app } from "electron"
+import { ipcMain, app, desktopCapturer } from "electron"
 import { AppState } from "./main"
+import { execFile } from "child_process"
+import * as path from "path"
+import * as fs from "fs"
+import * as os from "os"
 
 export function initializeIpcHandlers(appState: AppState): void {
   ipcMain.handle(
@@ -200,4 +204,116 @@ export function initializeIpcHandlers(appState: AppState): void {
       return { success: false, error: error.message };
     }
   });
+
+  // Desktop sources for system audio capture
+  ipcMain.handle("get-desktop-sources", async () => {
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ["window", "screen"],
+        thumbnailSize: { width: 150, height: 150 }
+      })
+      return sources.map((s) => ({
+        id: s.id,
+        name: s.name,
+        thumbnail: s.thumbnail.toDataURL()
+      }))
+    } catch (error: any) {
+      console.error("Error getting desktop sources:", error)
+      throw error
+    }
+  })
+
+  // Transcribe audio (WAV base64 from renderer)
+  // Fallback chain: Whisper CLI → Windows Speech Recognition
+  ipcMain.handle("transcribe-audio", async (_, audioBase64: string) => {
+    const tmpDir = os.tmpdir()
+    const wavPath = path.join(tmpDir, `cluely-audio-${Date.now()}.wav`)
+
+    try {
+      const buffer = Buffer.from(audioBase64, "base64")
+      fs.writeFileSync(wavPath, buffer)
+      console.log(`[Transcribe] Saved ${buffer.length} bytes to ${wavPath}`)
+
+      // 1) Try Whisper CLI
+      try {
+        const whisperText = await new Promise<string>((resolve, reject) => {
+          execFile(
+            "whisper",
+            [wavPath, "--model", "tiny", "--output_format", "txt", "--output_dir", tmpDir],
+            { timeout: 60000 },
+            (error) => {
+              if (error) {
+                reject(error)
+                return
+              }
+              const txtPath = wavPath.replace(".wav", ".txt")
+              if (fs.existsSync(txtPath)) {
+                const text = fs.readFileSync(txtPath, "utf-8").trim()
+                try { fs.unlinkSync(txtPath) } catch {}
+                resolve(text)
+              } else {
+                reject(new Error("Whisper output not found"))
+              }
+            }
+          )
+        })
+        console.log("[Transcribe] Whisper succeeded")
+        return { success: true, text: whisperText }
+      } catch (whisperErr: any) {
+        console.log("[Transcribe] Whisper unavailable, trying Windows Speech Recognition...", whisperErr.message)
+      }
+
+      // 2) Fallback: Windows built-in Speech Recognition (System.Speech)
+      if (process.platform === "win32") {
+        try {
+          const psScript = `
+Add-Type -AssemblyName System.Speech
+$rec = New-Object System.Speech.Recognition.SpeechRecognitionEngine
+$rec.SetInputToWaveFile('${wavPath.replace(/\\/g, "\\\\")}')
+$grammar = New-Object System.Speech.Recognition.DictationGrammar
+$rec.LoadGrammar($grammar)
+$result = $rec.Recognize()
+if ($result) { $result.Text } else { '' }
+$rec.Dispose()
+`
+          const winText = await new Promise<string>((resolve, reject) => {
+            // Use Windows PowerShell 5.1 (has System.Speech), not pwsh 7
+            const psExe = path.join(
+              process.env.SystemRoot || "C:\\Windows",
+              "System32", "WindowsPowerShell", "v1.0", "powershell.exe"
+            )
+            execFile(
+              psExe,
+              ["-NoProfile", "-NonInteractive", "-Command", psScript],
+              { timeout: 30000 },
+              (error, stdout, stderr) => {
+                if (error) {
+                  console.error("[Transcribe] Win Speech stderr:", stderr)
+                  reject(error)
+                  return
+                }
+                resolve((stdout || "").trim())
+              }
+            )
+          })
+          if (winText) {
+            console.log("[Transcribe] Windows Speech Recognition succeeded")
+            return { success: true, text: winText }
+          } else {
+            return { success: false, error: "No speech detected" }
+          }
+        } catch (winErr: any) {
+          console.error("[Transcribe] Windows Speech Recognition failed:", winErr.message)
+          return { success: false, error: "Speech recognition failed. Install Whisper (pip install openai-whisper) for better results." }
+        }
+      }
+
+      return { success: false, error: "No transcription engine available. Install Whisper: pip install openai-whisper" }
+    } catch (error: any) {
+      console.error("[Transcribe] Failed:", error.message)
+      return { success: false, error: error.message }
+    } finally {
+      try { fs.unlinkSync(wavPath) } catch {}
+    }
+  })
 }

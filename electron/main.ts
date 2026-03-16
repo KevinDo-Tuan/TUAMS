@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, powerMonitor } from "electron"
+import { app, BrowserWindow, Tray, Menu, nativeImage, powerMonitor, session } from "electron"
 import { initializeIpcHandlers } from "./ipcHandlers"
 import { WindowHelper } from "./WindowHelper"
 import { ScreenshotHelper } from "./ScreenshotHelper"
@@ -274,6 +274,13 @@ async function initializeApp() {
 
   app.whenReady().then(() => {
     console.log("App is ready")
+
+    // Grant microphone permissions for MediaRecorder / getUserMedia
+    session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+      const allowed = ["media", "audioCapture", "mediaKeySystem"]
+      callback(allowed.includes(permission))
+    })
+
     appState.createWindow()
     appState.createTray()
     // Register global shortcuts using ShortcutsHelper

@@ -1,4 +1,6 @@
-import { globalShortcut, app, BrowserWindow } from "electron"
+import { globalShortcut, app, BrowserWindow, clipboard } from "electron"
+import { execSync } from "child_process"
+import * as path from "path"
 import { AppState } from "./main"
 
 export class ShortcutsHelper {
@@ -61,6 +63,43 @@ export class ShortcutsHelper {
 
     register("CommandOrControl+Shift+Up", () => {
       this.appState.moveWindowUp()
+    })
+
+    register("CommandOrControl+Shift+K", async () => {
+      const mainWindow = this.appState.getMainWindow()
+      if (!mainWindow || mainWindow.isDestroyed()) return
+
+      try {
+        // Simulate Ctrl+A then Ctrl+C on the foreground window (e.g. Azota)
+        const psExe = path.join(
+          process.env.SystemRoot || "C:\\Windows",
+          "System32", "WindowsPowerShell", "v1.0", "powershell.exe"
+        )
+        execSync(
+          `"${psExe}" -NoProfile -NonInteractive -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^a'); Start-Sleep -Milliseconds 150; [System.Windows.Forms.SendKeys]::SendWait('^c')"`,
+          { windowsHide: true, timeout: 5000 }
+        )
+
+        // Wait for clipboard to populate
+        await new Promise(resolve => setTimeout(resolve, 200))
+
+        const text = clipboard.readText()
+        if (!text || !text.trim()) {
+          console.log("[Shortcuts] Ctrl+Shift+K: clipboard empty, skipping")
+          return
+        }
+
+        // Show window without stealing focus
+        if (!this.appState.isVisible()) {
+          mainWindow.showInactive()
+        }
+        mainWindow.setAlwaysOnTop(true, "screen-saver")
+
+        // Send clipboard text to renderer for chat
+        mainWindow.webContents.send("clipboard-chat", text.trim())
+      } catch (error) {
+        console.error("[Shortcuts] Ctrl+Shift+K error:", error)
+      }
     })
 
     register("CommandOrControl+B", () => {

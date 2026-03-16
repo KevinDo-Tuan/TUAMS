@@ -16,6 +16,8 @@ export interface ElectronAPI {
   onProblemExtracted: (callback: (data: any) => void) => () => void
   onSolutionSuccess: (callback: (data: any) => void) => () => void
   onUnauthorized: (callback: () => void) => () => void
+  onFocusChat: (callback: () => void) => () => void
+  onClipboardChat: (callback: (text: string) => void) => () => void
   onDebugError: (callback: (error: string) => void) => () => void
   takeScreenshot: () => Promise<void>
   moveWindowLeft: () => Promise<void>
@@ -34,6 +36,10 @@ export interface ElectronAPI {
   switchToOllama: (model?: string, url?: string) => Promise<{ success: boolean; error?: string }>
   switchToCloud: (model?: string) => Promise<{ success: boolean; error?: string }>
   testLlmConnection: () => Promise<{ success: boolean; error?: string }>
+
+  // System audio capture
+  getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>
+  transcribeAudio: (audioBase64: string) => Promise<{ success: boolean; text?: string; error?: string }>
 
   invoke: (channel: string, ...args: any[]) => Promise<any>
 }
