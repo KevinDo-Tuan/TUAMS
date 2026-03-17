@@ -101,6 +101,9 @@ export class WindowHelper {
     this.mainWindow = new BrowserWindow(windowSettings)
     // this.mainWindow.webContents.openDevTools()
 
+    // Apply display affinity BEFORE showing, so the window is never visible to capture
+    this.applyDisplayAffinity()
+
     // Non-Windows: use Electron's content protection (shows black rectangle)
     if (process.platform !== "win32") {
       this.mainWindow.setContentProtection(true)
@@ -134,11 +137,11 @@ export class WindowHelper {
     this.mainWindow.once('ready-to-show', () => {
       if (this.mainWindow) {
         this.centerWindow()
+        // Reapply display affinity right before show (safety net)
+        this.applyDisplayAffinity()
         this.mainWindow.show()
         this.mainWindow.focus()
         this.mainWindow.setAlwaysOnTop(true, "screen-saver")
-        // Apply display affinity AFTER window is visible
-        this.applyDisplayAffinity()
         console.log("Window is now visible and centered")
       }
     })
@@ -249,8 +252,8 @@ export class WindowHelper {
       })
     }
 
-    this.mainWindow.showInactive()
     this.applyDisplayAffinity()
+    this.mainWindow.showInactive()
 
     this.isWindowVisible = true
   }
@@ -302,10 +305,10 @@ export class WindowHelper {
     }
 
     this.centerWindow()
+    this.applyDisplayAffinity()
     this.mainWindow.show()
     this.mainWindow.focus()
     this.mainWindow.setAlwaysOnTop(true, "screen-saver")
-    this.applyDisplayAffinity()
     this.isWindowVisible = true
 
     console.log(`Window centered and shown`)

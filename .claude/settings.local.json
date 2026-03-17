@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(grep -r \"markdown\\\\|marked\\\\|remark\\\\|rehype\\\\|react-markdown\\\\|SyntaxHighlighter\" /c/Users/dopha/coding/free_cluely/src --include=*.tsx --include=*.ts)"
     ]
   }
 }

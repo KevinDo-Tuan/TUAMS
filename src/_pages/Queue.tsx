@@ -10,6 +10,7 @@ import {
 } from "../components/ui/toast"
 import QueueCommands from "../components/Queue/QueueCommands"
 import ModelSelector from "../components/ui/ModelSelector"
+import MarkdownMessage from "../components/Chat/MarkdownMessage"
 
 interface QueueProps {
   setView: React.Dispatch<React.SetStateAction<"queue" | "solutions" | "debug">>
@@ -33,6 +34,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
   const [isChatOpen, setIsChatOpen] = useState(false)
   const chatInputRef = useRef<HTMLInputElement>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const [pendingAttachment, setPendingAttachment] = useState<{ transcript: string; frames: string[] } | null>(null)
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [currentModel, setCurrentModel] = useState<{ provider: string; model: string }>({ provider: "ollama", model: "mixtral:8x7b" })
@@ -88,12 +90,30 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
   }
 
   const handleChatSend = async () => {
-    if (!chatInput.trim()) return
-    setChatMessages((msgs) => [...msgs, { role: "user", text: chatInput }])
+    const attachment = pendingAttachment
+    const userText = chatInput.trim()
+
+    if (!userText && !attachment) return
+
+    const displayText = attachment
+      ? `[Video] ${userText || 'Analyze this recording'}`
+      : userText
+
+    setChatMessages((msgs) => [...msgs, { role: "user", text: displayText }])
     setChatLoading(true)
     setChatInput("")
+    setPendingAttachment(null)
+
     try {
-      const response = await window.electronAPI.invoke("ai-chat", chatInput)
+      let response: string
+      if (attachment) {
+        const prompt = userText
+          ? `${userText}\n\nAudio transcript from recording:\n"${attachment.transcript}"\n\nThe attached images are frames captured from the screen during recording.`
+          : `The user recorded their screen while speaking. Audio transcript:\n"${attachment.transcript}"\n\nThe attached images are frames from the screen recording. Analyze what is shown and provide a helpful response.`
+        response = await (window.electronAPI as any).chatWithVision(prompt, attachment.frames)
+      } else {
+        response = await window.electronAPI.invoke("ai-chat", userText)
+      }
       setChatMessages((msgs) => [...msgs, { role: "ai", text: response }])
     } catch (err) {
       setChatMessages((msgs) => [...msgs, { role: "ai", text: "Error: " + String(err) }])
@@ -143,11 +163,11 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     updateDimensions()
 
     const cleanupFunctions = [
-      window.electronAPI.onFocusChat(() => {
+      (window.electronAPI as any).onFocusChat(() => {
         setIsChatOpen(true)
         setTimeout(() => chatInputRef.current?.focus(), 50)
       }),
-      window.electronAPI.onClipboardChat(async (text: string) => {
+      (window.electronAPI as any).onClipboardChat(async (text: string) => {
         setIsChatOpen(true)
         setChatMessages(msgs => [...msgs, { role: "user", text }])
         setChatLoading(true)
@@ -186,21 +206,15 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     }
   }, [isTooltipVisible, tooltipHeight])
 
-  // Seamless screenshot-to-LLM flow
+  // Screenshot → attach to chat for review before sending
   useEffect(() => {
     const unsubscribe = window.electronAPI.onScreenshotTaken(async (data) => {
       await refetch();
-      setChatLoading(true);
-      try {
-        const latest = data?.path || (Array.isArray(data) && data.length > 0 && data[data.length - 1]?.path);
-        if (latest) {
-          const response = await window.electronAPI.invoke("analyze-image-file", latest);
-          setChatMessages((msgs) => [...msgs, { role: "ai", text: response.text }]);
-        }
-      } catch (err) {
-        setChatMessages((msgs) => [...msgs, { role: "ai", text: "Error: " + String(err) }]);
-      } finally {
-        setChatLoading(false);
+      if (data?.preview) {
+        const base64 = data.preview.replace(/^data:image\/\w+;base64,/, '')
+        setPendingAttachment({ transcript: '', frames: [base64] })
+        setIsChatOpen(true)
+        setTimeout(() => chatInputRef.current?.focus(), 50)
       }
     });
     return () => {
@@ -234,6 +248,12 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     } finally {
       setChatLoading(false)
     }
+  }
+
+  const handleScreenRecordingMessage = (transcript: string, frames: string[]) => {
+    setIsChatOpen(true)
+    setPendingAttachment({ transcript, frames })
+    setTimeout(() => chatInputRef.current?.focus(), 50)
   }
 
   const handleModelChange = (provider: "ollama" | "cloud", model: string) => {
@@ -273,6 +293,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
               onChatToggle={handleChatToggle}
               onSettingsToggle={handleSettingsToggle}
               onVoiceMessage={handleVoiceMessage}
+              onScreenRecordingMessage={handleScreenRecordingMessage}
             />
           </div>
           {/* Settings Panel */}
@@ -311,7 +332,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                         }`}
                         style={{ wordBreak: "break-word" }}
                       >
-                        {msg.text}
+                        {msg.role === "ai" ? <MarkdownMessage content={msg.text} /> : msg.text}
                       </div>
                     </div>
                   ))
@@ -329,12 +350,29 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                 )}
                 <div ref={chatEndRef} />
               </div>
+              {/* Attachment Preview */}
+              {pendingAttachment && (
+                <div className="mx-2 mb-1 ml-auto p-2 rounded-lg bg-white/5 border border-white/10 animate-fade-in max-w-[70%]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-medium text-red-200/80">
+                      Video attached, type your prompt
+                    </span>
+                    <button
+                      type="button"
+                      className="text-[10px] text-red-400/60 hover:text-red-300 transition-colors ml-3"
+                      onClick={() => setPendingAttachment(null)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              )}
               {/* Input Area */}
               <form className="flex gap-2 items-center glass-content" onSubmit={e => { e.preventDefault(); handleChatSend(); }}>
                 <input
                   ref={chatInputRef}
                   className="glass-input flex-1 px-3.5 py-2.5 text-xs"
-                  placeholder="Ask anything..."
+                  placeholder={pendingAttachment ? "Add a message or press Send..." : "Ask anything..."}
                   value={chatInput}
                   onChange={e => setChatInput(e.target.value)}
                   disabled={chatLoading}
@@ -342,7 +380,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                 <button
                   type="submit"
                   className="btn-primary p-2.5 rounded-xl flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none"
-                  disabled={chatLoading || !chatInput.trim()}
+                  disabled={chatLoading || (!chatInput.trim() && !pendingAttachment)}
                   tabIndex={-1}
                   aria-label="Send"
                 >

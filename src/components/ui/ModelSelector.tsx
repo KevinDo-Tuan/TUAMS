@@ -3,9 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 const CLOUD_MODELS = [
   "glm-5:cloud",
   "gpt-oss:20b-cloud",
-  "llama3.3:cloud",
-  "phi4-mini:cloud",
-  "qwen2.5:cloud",
+
 ];
 
 interface ModelConfig {

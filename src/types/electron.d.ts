@@ -1,4 +1,4 @@
-export interface ElectronAPI {
+interface ElectronAPI {
   updateContentDimensions: (dimensions: {
     width: number
     height: number
@@ -40,6 +40,7 @@ export interface ElectronAPI {
   // System audio capture
   getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>
   transcribeAudio: (audioBase64: string) => Promise<{ success: boolean; text?: string; error?: string }>
+  chatWithVision: (message: string, images: string[]) => Promise<string>
 
   invoke: (channel: string, ...args: any[]) => Promise<any>
 }

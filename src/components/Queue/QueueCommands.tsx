@@ -7,6 +7,7 @@ interface QueueCommandsProps {
   onChatToggle: () => void
   onSettingsToggle: () => void
   onVoiceMessage: (text: string) => void
+  onScreenRecordingMessage: (transcript: string, frames: string[]) => void
 }
 
 const QueueCommands: React.FC<QueueCommandsProps> = ({
@@ -14,24 +15,27 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   screenshots,
   onChatToggle,
   onSettingsToggle,
-  onVoiceMessage
+  onVoiceMessage,
+  onScreenRecordingMessage
 }) => {
   const [isTooltipVisible, setIsTooltipVisible] = useState(false)
   const tooltipRef = useRef<HTMLDivElement>(null)
 
-  // Mic recording state (MediaRecorder — record, transcribe, send to AI)
+  // Screen + mic recording state
   const [isRecording, setIsRecording] = useState(false)
   const [recordStatus, setRecordStatus] = useState<string | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const recChunksRef = useRef<Blob[]>([])
   const recStreamRef = useRef<MediaStream | null>(null)
+  const screenStreamRef = useRef<MediaStream | null>(null)
+  const screenVideoRef = useRef<HTMLVideoElement | null>(null)
+  const framesCapturedRef = useRef<string[]>([])
+  const frameIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Listen mode state (MediaRecorder — record, transcribe, show transcript, send on stop)
+  // Listen mode state (live transcription via Windows Speech Recognition)
   const [isListening, setIsListening] = useState(false)
   const [listenStatus, setListenStatus] = useState<string | null>(null)
   const [listenElapsed, setListenElapsed] = useState(0)
-  const listenRecorderRef = useRef<MediaRecorder | null>(null)
-  const listenChunksRef = useRef<Blob[]>([])
   const listenStreamRef = useRef<MediaStream | null>(null)
   const listenTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -48,7 +52,8 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     return () => {
       recorderRef.current?.stop()
       recStreamRef.current?.getTracks().forEach(t => t.stop())
-      listenRecorderRef.current?.stop()
+      screenStreamRef.current?.getTracks().forEach(t => t.stop())
+      if (frameIntervalRef.current) clearInterval(frameIntervalRef.current)
       listenStreamRef.current?.getTracks().forEach(t => t.stop())
       if (listenTimerRef.current) clearInterval(listenTimerRef.current)
     }
@@ -116,6 +121,22 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     throw new Error(result.error || "Transcription failed")
   }
 
+  // Capture a frame from a live video element as base64 JPEG
+  const captureFrame = (video: HTMLVideoElement): string | null => {
+    try {
+      if (!video.videoWidth || !video.videoHeight) return null
+      const canvas = document.createElement('canvas')
+      const scale = Math.min(1, 1280 / video.videoWidth)
+      canvas.width = Math.round(video.videoWidth * scale)
+      canvas.height = Math.round(video.videoHeight * scale)
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      return canvas.toDataURL('image/jpeg', 0.7).replace(/^data:image\/jpeg;base64,/, '')
+    } catch {
+      return null
+    }
+  }
+
   // Format seconds as M:SS
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60)
@@ -123,20 +144,51 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     return `${m}:${s.toString().padStart(2, "0")}`
   }
 
-  // ── Record (capture mic → transcribe → send to AI immediately) ──
+  // ── Record (screen frames + mic audio → transcribe → send to vision AI) ──
   const handleRecordClick = async () => {
     if (isRecording) {
-      // Stop recording
+      // Stop: audio recorder onstop handles everything
       recorderRef.current?.stop()
       return
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      recStreamRef.current = stream
-      recChunksRef.current = []
+      // 1. Get screen source
+      const sources = await (window.electronAPI as any).getDesktopSources()
+      const screenSource = sources.find((s: any) => s.id.startsWith('screen:'))
+      if (!screenSource) {
+        setRecordStatus('No screen source found')
+        setTimeout(() => setRecordStatus(null), 3000)
+        return
+      }
 
-      const recorder = new MediaRecorder(stream)
+      // 2. Get screen video stream (for live frame capture, NOT recording)
+      const screenStream = await (navigator.mediaDevices as any).getUserMedia({
+        audio: false,
+        video: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: screenSource.id
+          }
+        }
+      })
+      screenStreamRef.current = screenStream
+
+      // 3. Set up a hidden video element showing the live screen
+      const video = document.createElement('video')
+      video.srcObject = screenStream
+      video.muted = true
+      video.play()
+      screenVideoRef.current = video
+
+      // 4. Get mic audio stream and record audio only
+      const micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      recStreamRef.current = micStream
+
+      recChunksRef.current = []
+      framesCapturedRef.current = []
+
+      const recorder = new MediaRecorder(micStream)
       recorderRef.current = recorder
 
       recorder.ondataavailable = (e) => {
@@ -144,24 +196,57 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       }
 
       recorder.onstop = async () => {
-        // Stop mic stream
-        stream.getTracks().forEach(t => t.stop())
+        // Stop frame capture interval
+        if (frameIntervalRef.current) {
+          clearInterval(frameIntervalRef.current)
+          frameIntervalRef.current = null
+        }
+
+        // Capture one last frame
+        if (screenVideoRef.current) {
+          const frame = captureFrame(screenVideoRef.current)
+          if (frame && framesCapturedRef.current.length < 15) {
+            framesCapturedRef.current.push(frame)
+          }
+        }
+
+        // Stop streams
+        screenStream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+        micStream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+        screenStreamRef.current = null
         recStreamRef.current = null
+        screenVideoRef.current = null
         recorderRef.current = null
 
-        const blob = new Blob(recChunksRef.current, { type: "audio/webm" })
-        if (blob.size === 0) {
+        const frames = framesCapturedRef.current
+        const audioBlob = new Blob(recChunksRef.current, { type: 'audio/webm' })
+
+        if (audioBlob.size === 0 && frames.length === 0) {
           setRecordStatus(null)
           setIsRecording(false)
           return
         }
 
-        setRecordStatus("Transcribing...")
+        setRecordStatus('Transcribing audio...')
         try {
-          const text = await transcribeBlob(blob)
-          setRecordStatus(null)
+          let transcript = ''
+          try {
+            if (audioBlob.size > 0) {
+              transcript = await transcribeBlob(audioBlob)
+            }
+          } catch {
+            transcript = '(audio transcription unavailable)'
+          }
+
+          setRecordStatus('Sending to AI...')
           setIsRecording(false)
-          if (text.trim()) onVoiceMessage(text.trim())
+
+          if (frames.length > 0) {
+            onScreenRecordingMessage(transcript, frames)
+          } else if (transcript.trim()) {
+            onVoiceMessage(transcript.trim())
+          }
+          setRecordStatus(null)
         } catch (err: any) {
           setRecordStatus(`Error: ${err.message}`)
           setIsRecording(false)
@@ -170,101 +255,99 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       }
 
       recorder.onerror = () => {
-        setRecordStatus("Recording error")
+        setRecordStatus('Recording error')
         setIsRecording(false)
-        stream.getTracks().forEach(t => t.stop())
+        if (frameIntervalRef.current) clearInterval(frameIntervalRef.current)
+        screenStream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+        micStream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
         setTimeout(() => setRecordStatus(null), 3000)
       }
 
+      // 5. Start audio recording
       recorder.start()
       setIsRecording(true)
-      setRecordStatus("Recording... speak now")
+      setRecordStatus('Recording screen + mic...')
+
+      // 6. Capture first frame immediately, then every 5 seconds (max 10)
+      const firstFrame = captureFrame(video)
+      if (firstFrame) framesCapturedRef.current.push(firstFrame)
+
+      frameIntervalRef.current = setInterval(() => {
+        if (framesCapturedRef.current.length >= 15) {
+          if (frameIntervalRef.current) clearInterval(frameIntervalRef.current)
+          return
+        }
+        if (screenVideoRef.current) {
+          const frame = captureFrame(screenVideoRef.current)
+          if (frame) framesCapturedRef.current.push(frame)
+        }
+      }, 1000)
     } catch (err: any) {
-      console.error("Mic access error:", err)
-      setRecordStatus(`Mic error: ${err.message}`)
+      console.error('Screen recording error:', err)
+      setRecordStatus(`Error: ${err.message}`)
       setTimeout(() => setRecordStatus(null), 4000)
     }
   }
 
-  // ── Listen (capture mic → show duration → transcribe on stop → send to AI) ──
+  // ── Listen (live transcription via Windows Speech Recognition) ──
   const handleListenClick = async () => {
     if (isListening) {
-      // Stop listening
-      listenRecorderRef.current?.stop()
+      // Stop: get accumulated text and send to AI
+      if (listenTimerRef.current) {
+        clearInterval(listenTimerRef.current)
+        listenTimerRef.current = null
+      }
+      setIsListening(false)
+
+      try {
+        const result: { success: boolean; text?: string } =
+          await window.electronAPI.invoke("stop-live-transcription")
+        const text = result.text?.trim()
+        if (text) {
+          onVoiceMessage(text)
+          setListenStatus(`Sent: ${text}`)
+          setTimeout(() => setListenStatus(null), 3000)
+        } else {
+          setListenStatus("No speech detected")
+          setTimeout(() => setListenStatus(null), 3000)
+        }
+      } catch {
+        setListenStatus("Error stopping transcription")
+        setTimeout(() => setListenStatus(null), 3000)
+      }
+      setListenElapsed(0)
       return
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      listenStreamRef.current = stream
-      listenChunksRef.current = []
-
-      const recorder = new MediaRecorder(stream)
-      listenRecorderRef.current = recorder
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) listenChunksRef.current.push(e.data)
+      // Start live transcription in main process
+      const startResult: { success: boolean; error?: string } =
+        await window.electronAPI.invoke("start-live-transcription")
+      if (!startResult.success) {
+        setListenStatus(`Error: ${startResult.error}`)
+        setTimeout(() => setListenStatus(null), 4000)
+        return
       }
 
-      recorder.onstop = async () => {
-        // Stop timer & mic
-        if (listenTimerRef.current) {
-          clearInterval(listenTimerRef.current)
-          listenTimerRef.current = null
-        }
-        stream.getTracks().forEach(t => t.stop())
-        listenStreamRef.current = null
-        listenRecorderRef.current = null
-
-        const blob = new Blob(listenChunksRef.current, { type: "audio/webm" })
-        if (blob.size === 0) {
-          setListenStatus(null)
-          setIsListening(false)
-          setListenElapsed(0)
-          return
-        }
-
-        setListenStatus("Transcribing...")
-        setIsListening(false)
-
-        try {
-          const text = await transcribeBlob(blob)
-          if (text.trim()) {
-            setListenStatus(`Transcript: ${text.trim()}`)
-            onVoiceMessage(text.trim())
-            setTimeout(() => setListenStatus(null), 5000)
-          } else {
-            setListenStatus("No speech detected")
-            setTimeout(() => setListenStatus(null), 3000)
-          }
-        } catch (err: any) {
-          setListenStatus(`Error: ${err.message}`)
-          setTimeout(() => setListenStatus(null), 5000)
-        }
-        setListenElapsed(0)
-      }
-
-      recorder.onerror = () => {
-        setListenStatus("Recording error")
-        setIsListening(false)
-        setListenElapsed(0)
-        stream.getTracks().forEach(t => t.stop())
-        if (listenTimerRef.current) clearInterval(listenTimerRef.current)
-        setTimeout(() => setListenStatus(null), 3000)
-      }
-
-      recorder.start()
       setIsListening(true)
       setListenElapsed(0)
       setListenStatus("Listening...")
+
+      // Listen for live transcript updates
+      const cleanup = (window.electronAPI as any).onLiveTranscript((data: { type: string; text: string }) => {
+        if (data.text) {
+          setListenStatus(data.text)
+        }
+      })
+      listenStreamRef.current = { getTracks: () => [{ stop: cleanup }] } as any
 
       // Elapsed timer
       listenTimerRef.current = setInterval(() => {
         setListenElapsed(prev => prev + 1)
       }, 1000)
     } catch (err: any) {
-      console.error("Mic access error:", err)
-      setListenStatus(`Mic error: ${err.message}`)
+      console.error("Live transcription error:", err)
+      setListenStatus(`Error: ${err.message}`)
       setTimeout(() => setListenStatus(null), 4000)
     }
   }
@@ -325,7 +408,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           }`}
           onClick={handleRecordClick}
           type="button"
-          title="Record your voice, sends to AI on stop"
+          title="Record screen + voice, sends to vision AI on stop"
         >
           <span className={`inline-block w-1.5 h-1.5 rounded-full transition-all duration-300 ${
             isRecording ? 'bg-[hsl(0,72%,60%)] animate-pulse' : 'bg-[hsla(0,72%,60%,0.5)]'
@@ -439,7 +522,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           {isRecording && (
             <div className="mt-1.5 flex items-center gap-1.5">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-[hsl(0,72%,60%)] animate-pulse" />
-              <span className="text-[10px] text-red-300/50">Click Stop to transcribe & send</span>
+              <span className="text-[10px] text-red-300/50">Click Stop to finish recording</span>
             </div>
           )}
         </div>

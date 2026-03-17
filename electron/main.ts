@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, powerMonitor, session } from "electron"
+import { spawn } from "child_process"
 import { initializeIpcHandlers } from "./ipcHandlers"
 import { WindowHelper } from "./WindowHelper"
 import { ScreenshotHelper } from "./ScreenshotHelper"
@@ -268,6 +269,19 @@ export class AppState {
 // Application initialization
 async function initializeApp() {
   const appState = AppState.getInstance()
+
+  // Ensure Ollama server is running (no-op if already started)
+  try {
+    const ollama = spawn("ollama", ["serve"], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true
+    })
+    ollama.unref()
+    console.log("[App] Spawned ollama serve (pid:", ollama.pid, ")")
+  } catch (err) {
+    console.warn("[App] Could not start ollama serve:", err)
+  }
 
   // Initialize IPC handlers before window creation
   initializeIpcHandlers(appState)

@@ -2,7 +2,7 @@
 
 import { ipcMain, app, desktopCapturer } from "electron"
 import { AppState } from "./main"
-import { execFile } from "child_process"
+import { execFile, spawn, ChildProcess } from "child_process"
 import * as path from "path"
 import * as fs from "fs"
 import * as os from "os"
@@ -113,6 +113,16 @@ export function initializeIpcHandlers(appState: AppState): void {
       return result;
     } catch (error: any) {
       console.error("Error in ai-chat handler:", error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle("ai-chat-vision", async (event, message: string, images: string[]) => {
+    try {
+      const result = await appState.processingHelper.getLLMHelper().chatWithVision(message, images);
+      return result;
+    } catch (error: any) {
+      console.error("Error in ai-chat-vision handler:", error);
       throw error;
     }
   });
@@ -315,5 +325,127 @@ $rec.Dispose()
     } finally {
       try { fs.unlinkSync(wavPath) } catch {}
     }
+  })
+
+  // ── Live transcription (streaming Windows Speech Recognition) ──
+  let liveTranscriptionProcess: ChildProcess | null = null
+  let liveTranscriptAccumulated = ""
+
+  ipcMain.handle("start-live-transcription", async () => {
+    if (liveTranscriptionProcess) {
+      return { success: false, error: "Already running" }
+    }
+    if (process.platform !== "win32") {
+      return { success: false, error: "Live transcription only supported on Windows" }
+    }
+
+    liveTranscriptAccumulated = ""
+
+    const psExe = path.join(
+      process.env.SystemRoot || "C:\\Windows",
+      "System32", "WindowsPowerShell", "v1.0", "powershell.exe"
+    )
+
+    // C# code that runs continuous speech recognition from default mic
+    // Outputs "PARTIAL:text" and "FINAL:text" lines to stdout
+    const csCode = `
+using System;
+using System.Speech.Recognition;
+public class LiveSR {
+  public static void Start() {
+    var rec = new SpeechRecognitionEngine();
+    rec.LoadGrammar(new DictationGrammar());
+    rec.SetInputToDefaultAudioDevice();
+    rec.SpeechHypothesized += (s, e) => {
+      Console.WriteLine("PARTIAL:" + e.Result.Text);
+      Console.Out.Flush();
+    };
+    rec.SpeechRecognized += (s, e) => {
+      Console.WriteLine("FINAL:" + e.Result.Text);
+      Console.Out.Flush();
+    };
+    rec.RecognizeAsync(RecognizeMode.Multiple);
+    Console.ReadLine();
+    rec.RecognizeAsyncCancel();
+    rec.Dispose();
+  }
+}
+`
+    const psScript = `
+Add-Type -AssemblyName System.Speech
+Add-Type -TypeDefinition @'
+${csCode}
+'@ -ReferencedAssemblies System.Speech
+[LiveSR]::Start()
+`
+
+    try {
+      const proc = spawn(psExe, ["-NoProfile", "-NonInteractive", "-Command", psScript], {
+        windowsHide: true,
+        stdio: ["pipe", "pipe", "pipe"]
+      })
+      liveTranscriptionProcess = proc
+
+      proc.stdout?.on("data", (data: Buffer) => {
+        const lines = data.toString().split("\n").filter(l => l.trim())
+        for (const line of lines) {
+          const mainWindow = appState.getMainWindow()
+          if (!mainWindow || mainWindow.isDestroyed()) continue
+
+          if (line.startsWith("FINAL:")) {
+            const text = line.slice(6).trim()
+            if (text) {
+              liveTranscriptAccumulated += (liveTranscriptAccumulated ? " " : "") + text
+              mainWindow.webContents.send("live-transcript", { type: "final", text: liveTranscriptAccumulated })
+            }
+          } else if (line.startsWith("PARTIAL:")) {
+            const partial = line.slice(8).trim()
+            if (partial) {
+              const display = liveTranscriptAccumulated + (liveTranscriptAccumulated ? " " : "") + partial
+              mainWindow.webContents.send("live-transcript", { type: "partial", text: display })
+            }
+          }
+        }
+      })
+
+      proc.stderr?.on("data", (data: Buffer) => {
+        console.log("[LiveTranscription] stderr:", data.toString().trim())
+      })
+
+      proc.on("close", () => {
+        liveTranscriptionProcess = null
+      })
+
+      proc.on("error", (err) => {
+        console.error("[LiveTranscription] Process error:", err)
+        liveTranscriptionProcess = null
+      })
+
+      console.log("[LiveTranscription] Started")
+      return { success: true }
+    } catch (err: any) {
+      console.error("[LiveTranscription] Failed to start:", err)
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle("stop-live-transcription", async () => {
+    if (liveTranscriptionProcess) {
+      try {
+        // Send newline to stdin to unblock Console.ReadLine() → graceful shutdown
+        liveTranscriptionProcess.stdin?.write("\n")
+        liveTranscriptionProcess.stdin?.end()
+      } catch {}
+      // Force kill after 2s if still alive
+      const proc = liveTranscriptionProcess
+      setTimeout(() => {
+        try { proc?.kill() } catch {}
+      }, 2000)
+      liveTranscriptionProcess = null
+    }
+    const result = liveTranscriptAccumulated
+    liveTranscriptAccumulated = ""
+    console.log("[LiveTranscription] Stopped, accumulated:", result)
+    return { success: true, text: result }
   })
 }

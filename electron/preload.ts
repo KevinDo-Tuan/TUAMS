@@ -47,6 +47,7 @@ interface ElectronAPI {
   
   getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>
   transcribeAudio: (audioBase64: string) => Promise<{ success: boolean; text?: string; error?: string }>
+  chatWithVision: (message: string, images: string[]) => Promise<string>
   invoke: (channel: string, ...args: any[]) => Promise<any>
 }
 
@@ -186,6 +187,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("clipboard-chat", subscription)
     return () => { ipcRenderer.removeListener("clipboard-chat", subscription) }
   },
+  onLiveTranscript: (callback: (data: { type: string; text: string }) => void) => {
+    const subscription = (_: any, data: { type: string; text: string }) => callback(data)
+    ipcRenderer.on("live-transcript", subscription)
+    return () => { ipcRenderer.removeListener("live-transcript", subscription) }
+  },
   moveWindowLeft: () => ipcRenderer.invoke("move-window-left"),
   moveWindowRight: () => ipcRenderer.invoke("move-window-right"),
   moveWindowUp: () => ipcRenderer.invoke("move-window-up"),
@@ -205,5 +211,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   
   getDesktopSources: () => ipcRenderer.invoke("get-desktop-sources"),
   transcribeAudio: (audioBase64: string) => ipcRenderer.invoke("transcribe-audio", audioBase64),
+  chatWithVision: (message: string, images: string[]) => ipcRenderer.invoke("ai-chat-vision", message, images),
   invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args)
 } as ElectronAPI)

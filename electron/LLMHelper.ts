@@ -1,3 +1,5 @@
+import * as fs from "fs"
+
 interface OllamaResponse {
   response: string
   done: boolean
@@ -10,6 +12,7 @@ export const OLLAMA_CLOUD_MODELS = [
   "llama3.3:cloud",
   "phi4-mini:cloud",
   "qwen2.5:cloud",
+  "qwen3-vl:235b-cloud",
 ]
 
 export class LLMHelper {
@@ -32,9 +35,9 @@ export class LLMHelper {
     return text.trim()
   }
 
-  private async callOllamaModel(url: string, model: string, prompt: string): Promise<string> {
+  private async callOllamaModel(url: string, model: string, prompt: string, images?: string[]): Promise<string> {
     const isCloud = OLLAMA_CLOUD_MODELS.includes(model)
-    const timeoutMs = isCloud ? 90_000 : 60_000
+    const timeoutMs = images?.length ? 180_000 : (isCloud ? 90_000 : 60_000)
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
 
@@ -46,7 +49,8 @@ export class LLMHelper {
           model,
           prompt,
           stream: false,
-          options: { temperature: 0.7, top_p: 0.9 }
+          options: { temperature: 0.7, top_p: 0.9 },
+          ...(images?.length ? { images } : {})
         }),
         signal: controller.signal,
       })
@@ -125,11 +129,20 @@ export class LLMHelper {
     }
   }
 
+  // Read image file(s) as raw base64 strings for vision model
+  private readImagesAsBase64(imagePaths: string[]): string[] {
+    return imagePaths
+      .map(p => { try { return fs.readFileSync(p).toString("base64") } catch { return null } })
+      .filter((b): b is string => b !== null)
+  }
+
   public async extractProblemFromImages(imagePaths: string[]) {
     try {
-      const imageDescriptions = imagePaths.map((_, i) => `[Image ${i + 1} attached]`).join(", ")
-      const prompt = `${this.systemPrompt}\n\nYou are a wingman. The user has shared ${imagePaths.length} screenshot(s): ${imageDescriptions}. Please analyze and extract the following information in JSON format:\n{\n  "problem_statement": "A clear statement of the problem or situation depicted in the images.",\n  "context": "Relevant background or context from the images.",\n  "suggested_responses": ["First possible answer or action", "Second possible answer or action", "..."],\n  "reasoning": "Explanation of why these suggestions are appropriate."\n}\nImportant: Return ONLY the JSON object, without any markdown formatting or code blocks.`
-      const text = this.cleanJsonResponse(await this.callOllama(prompt))
+      const images = this.readImagesAsBase64(imagePaths)
+      const prompt = `${this.systemPrompt}\n\nYou are a wingman. The user has shared ${imagePaths.length} screenshot(s). Please analyze the attached images and extract the following information in JSON format:\n{\n  "problem_statement": "A clear statement of the problem or situation depicted in the images.",\n  "context": "Relevant background or context from the images.",\n  "suggested_responses": ["First possible answer or action", "Second possible answer or action", "..."],\n  "reasoning": "Explanation of why these suggestions are appropriate."\n}\nImportant: Return ONLY the JSON object, without any markdown formatting or code blocks.`
+      const text = this.cleanJsonResponse(
+        await this.callOllamaModel(this.ollamaUrl, "qwen3-vl:235b-cloud", prompt, images)
+      )
       return JSON.parse(text)
     } catch (error) {
       console.error("Error extracting problem from images:", error)
@@ -153,8 +166,11 @@ export class LLMHelper {
 
   public async debugSolutionWithImages(problemInfo: any, currentCode: string, debugImagePaths: string[]) {
     try {
-      const prompt = `${this.systemPrompt}\n\nYou are a wingman. Given:\n1. The original problem or situation: ${JSON.stringify(problemInfo, null, 2)}\n2. The current response or approach: ${currentCode}\n3. The user has shared ${debugImagePaths.length} debug screenshot(s).\n\nPlease analyze and provide feedback in this JSON format:\n{\n  "solution": {\n    "code": "The code or main answer here.",\n    "problem_statement": "Restate the problem or situation.",\n    "context": "Relevant background/context.",\n    "suggested_responses": ["First possible answer or action", "Second possible answer or action", "..."],\n    "reasoning": "Explanation of why these suggestions are appropriate."\n  }\n}\nImportant: Return ONLY the JSON object, without any markdown formatting or code blocks.`
-      const text = this.cleanJsonResponse(await this.callOllama(prompt))
+      const images = this.readImagesAsBase64(debugImagePaths)
+      const prompt = `${this.systemPrompt}\n\nYou are a wingman. Given:\n1. The original problem or situation: ${JSON.stringify(problemInfo, null, 2)}\n2. The current response or approach: ${currentCode}\n3. The attached ${debugImagePaths.length} debug screenshot(s).\n\nPlease analyze and provide feedback in this JSON format:\n{\n  "solution": {\n    "code": "The code or main answer here.",\n    "problem_statement": "Restate the problem or situation.",\n    "context": "Relevant background/context.",\n    "suggested_responses": ["First possible answer or action", "Second possible answer or action", "..."],\n    "reasoning": "Explanation of why these suggestions are appropriate."\n  }\n}\nImportant: Return ONLY the JSON object, without any markdown formatting or code blocks.`
+      const text = this.cleanJsonResponse(
+        await this.callOllamaModel(this.ollamaUrl, "qwen3-vl:235b-cloud", prompt, images)
+      )
       const parsed = JSON.parse(text)
       console.log("[LLMHelper] Parsed debug LLM response:", parsed)
       return parsed
@@ -186,10 +202,11 @@ export class LLMHelper {
     }
   }
 
-  public async analyzeImageFile(_imagePath: string) {
+  public async analyzeImageFile(imagePath: string) {
     try {
-      const prompt = `${this.systemPrompt}\n\nThe user has shared a screenshot. Describe what you would expect to see and suggest several possible actions or responses the user could take next. Do not return a structured JSON object, just answer naturally and be concise.`
-      const text = await this.callOllama(prompt)
+      const images = this.readImagesAsBase64([imagePath])
+      const prompt = `${this.systemPrompt}\n\nThe user has shared a screenshot. Analyze what is shown in the image and suggest several possible actions or responses the user could take next. Be concise and helpful.`
+      const text = await this.callOllamaModel(this.ollamaUrl, "qwen3-vl:235b-cloud", prompt, images)
       return { text, timestamp: Date.now() }
     } catch (error) {
       console.error("Error analyzing image file:", error)
@@ -208,6 +225,12 @@ export class LLMHelper {
 
   public async chat(message: string): Promise<string> {
     return this.chatWithGemini(message)
+  }
+
+  public async chatWithVision(message: string, images: string[]): Promise<string> {
+    const prompt = `${this.systemPrompt}\n\n${message}`
+    console.log(`[LLMHelper] Vision request: ${images.length} images, model: qwen3-vl:235b-cloud`)
+    return this.callOllamaModel(this.ollamaUrl, "qwen3-vl:235b-cloud", prompt, images)
   }
 
   public isUsingOllama(): boolean {
