@@ -5,7 +5,6 @@ interface QueueCommandsProps {
   onTooltipVisibilityChange: (visible: boolean, height: number) => void
   screenshots: Array<{ path: string; preview: string }>
   onChatToggle: () => void
-  onSettingsToggle: () => void
   onVoiceMessage: (text: string) => void
   onScreenRecordingMessage: (transcript: string, frames: string[]) => void
 }
@@ -14,7 +13,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   onTooltipVisibilityChange,
   screenshots,
   onChatToggle,
-  onSettingsToggle,
   onVoiceMessage,
   onScreenRecordingMessage
 }) => {
@@ -205,7 +203,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         // Capture one last frame
         if (screenVideoRef.current) {
           const frame = captureFrame(screenVideoRef.current)
-          if (frame && framesCapturedRef.current.length < 15) {
+          if (frame && framesCapturedRef.current.length < 30) {
             framesCapturedRef.current.push(frame)
           }
         }
@@ -273,7 +271,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       if (firstFrame) framesCapturedRef.current.push(firstFrame)
 
       frameIntervalRef.current = setInterval(() => {
-        if (framesCapturedRef.current.length >= 15) {
+        if (framesCapturedRef.current.length >= 30) {
           if (frameIntervalRef.current) clearInterval(frameIntervalRef.current)
           return
         }
@@ -420,7 +418,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         <button
           className={`glass-btn flex items-center gap-1.5 transition-all duration-300 ${
             isListening
-              ? 'bg-[hsla(140,60%,45%,0.3)] border-[hsla(140,60%,45%,0.4)] text-white animate-glow'
+              ? 'bg-[hsla(175,60%,45%,0.3)] border-[hsla(175,60%,45%,0.4)] text-white animate-glow'
               : ''
           }`}
           onClick={handleListenClick}
@@ -440,15 +438,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           type="button"
         >
           Chat
-        </button>
-
-        {/* Models */}
-        <button
-          className="glass-btn"
-          onClick={onSettingsToggle}
-          type="button"
-        >
-          Models
         </button>
 
         {/* Help toggle */}
@@ -532,16 +521,16 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       {listenStatus !== null && (
         <div className="mt-2 liquid-glass-dark p-3 text-red-100 text-xs max-w-md animate-slide-up">
           <div className="flex items-center gap-2 mb-1.5">
-            <span className="font-semibold text-emerald-400">
+            <span className="font-semibold text-teal-400">
               {isListening ? 'Listening' : listenStatus.startsWith('Error') ? 'Error' : listenStatus.startsWith('Transcript') ? 'Done' : 'Processing'}
             </span>
             {isListening && (
               <>
-                <span className="text-emerald-300/70 font-mono text-[11px]">{formatTime(listenElapsed)}</span>
+                <span className="text-teal-300/70 font-mono text-[11px]">{formatTime(listenElapsed)}</span>
                 <span className="inline-flex items-center gap-1">
-                  <span className="loading-dot w-1 h-1 rounded-full bg-emerald-400 inline-block" />
-                  <span className="loading-dot w-1 h-1 rounded-full bg-emerald-400 inline-block" />
-                  <span className="loading-dot w-1 h-1 rounded-full bg-emerald-400 inline-block" />
+                  <span className="loading-dot w-1 h-1 rounded-full bg-teal-400 inline-block" />
+                  <span className="loading-dot w-1 h-1 rounded-full bg-teal-400 inline-block" />
+                  <span className="loading-dot w-1 h-1 rounded-full bg-teal-400 inline-block" />
                 </span>
               </>
             )}

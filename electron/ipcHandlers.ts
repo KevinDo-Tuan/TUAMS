@@ -1,11 +1,39 @@
 // ipcHandlers.ts
 
-import { ipcMain, app, desktopCapturer } from "electron"
+import { ipcMain, app, desktopCapturer, dialog } from "electron"
 import { AppState } from "./main"
 import { execFile, spawn, ChildProcess } from "child_process"
 import * as path from "path"
 import * as fs from "fs"
 import * as os from "os"
+
+async function renderPdfToImages(buffer: Buffer, pageCount: number): Promise<string[]> {
+  const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js")
+  const { createCanvas } = require("canvas")
+
+  const data = new Uint8Array(buffer)
+  const doc = await pdfjsLib.getDocument({ data, useSystemFonts: true }).promise
+  const images: string[] = []
+
+  for (let i = 1; i <= pageCount; i++) {
+    const page = await doc.getPage(i)
+    const scale = 1.5
+    const viewport = page.getViewport({ scale })
+    const canvas = createCanvas(viewport.width, viewport.height)
+    const ctx = canvas.getContext("2d")
+
+    await page.render({
+      canvasContext: ctx,
+      viewport,
+    }).promise
+
+    // Export as JPEG base64 (no data URL prefix)
+    const jpegBuffer = canvas.toBuffer("image/jpeg", { quality: 0.75 })
+    images.push(jpegBuffer.toString("base64"))
+  }
+
+  return images
+}
 
 export function initializeIpcHandlers(appState: AppState): void {
   ipcMain.handle(
@@ -126,6 +154,42 @@ export function initializeIpcHandlers(appState: AppState): void {
       throw error;
     }
   });
+
+  // PDF attachment handler
+  ipcMain.handle("open-pdf-dialog", async () => {
+    try {
+      const result = await (dialog.showOpenDialog as any)({
+        filters: [{ name: "PDF", extensions: ["pdf"] }],
+        properties: ["openFile"]
+      })
+      if (result.canceled || !result.filePaths?.[0]) return null
+
+      const pdfPath = result.filePaths[0]
+      const buffer = fs.readFileSync(pdfPath)
+
+      // Extract text
+      const pdfParse = require("pdf-parse")
+      const pdfData = await pdfParse(buffer)
+      const pageCount = pdfData.numpages
+
+      if (pageCount > 30) {
+        return { error: `PDF has ${pageCount} pages (max 30)` }
+      }
+
+      // Render pages to images using pdfjs-dist + canvas
+      const images = await renderPdfToImages(buffer, pageCount)
+
+      return {
+        fileName: path.basename(pdfPath),
+        pageCount,
+        text: pdfData.text,
+        images,
+      }
+    } catch (error: any) {
+      console.error("Error in open-pdf-dialog:", error)
+      return { error: error.message || "Failed to process PDF" }
+    }
+  })
 
   ipcMain.handle("quit-app", () => {
     app.quit()

@@ -22,6 +22,23 @@ export class LLMHelper {
   private ollamaUrl: string = "http://localhost:11434"
   private cloudModel: string = "glm-5:cloud"
   private activeModel: string = "mixtral:8x7b"
+  private readonly openRouterApiKey = process.env.OPENROUTER_API_KEY || "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"
+
+  // Text chat fallback chain: cloud first → local
+  private static readonly TEXT_FALLBACK_CHAIN = [
+    "glm-5:cloud",
+    "gpt-oss:20b-cloud",
+    "llama3.3:cloud",
+    "qwen2.5:cloud",
+    "mixtral:8x7b",
+  ]
+
+  // Vision fallback chain: Ollama cloud → OpenRouter
+  private static readonly VISION_FALLBACK_CHAIN: { model: string; provider: "ollama" | "openrouter" }[] = [
+    { model: "qwen3-vl:235b-cloud", provider: "ollama" },
+    { model: "qwen3.5:cloud", provider: "ollama" },
+    { model: "qwen/qwen3-vl-32b-instruct", provider: "openrouter" },
+  ]
 
   constructor(_apiKey?: string, _useOllama: boolean = true, ollamaModel?: string, ollamaUrl?: string) {
     this.ollamaUrl = ollamaUrl || "http://localhost:11434"
@@ -70,36 +87,88 @@ export class LLMHelper {
   }
 
   private async callOllama(prompt: string): Promise<string> {
-    // Cloud mode: Ollama routes cloud models internally (via `ollama login` credentials)
-    // No auth header needed — Ollama handles it.
-    if (this.useCloud) {
-      // Try primary cloud model first, then fallback to gpt-oss:20b-cloud on 401
-      const cloudChain = [this.cloudModel, ...(this.cloudModel !== "gpt-oss:20b-cloud" ? ["gpt-oss:20b-cloud"] : [])]
-      for (const model of cloudChain) {
-        try {
-          console.log(`[LLMHelper] Trying cloud model: ${model}`)
-          const result = await this.callOllamaModel(this.ollamaUrl, model, prompt)
-          this.activeModel = model
-          console.log(`[LLMHelper] Success with cloud model: ${model}`)
-          return result
-        } catch (error) {
-          const isUnauthorized = error.message.includes("401")
-          console.warn(`[LLMHelper] Cloud model ${model} failed: ${error.message}`)
-          if (!isUnauthorized) break // Only retry on 401, not other errors
-        }
-      }
-      console.warn("[LLMHelper] All cloud models failed. Falling back to local model.")
-    }
+    const errors: string[] = []
+    // User-selected model first, then remaining fallback chain
+    const preferred = this.useCloud ? this.cloudModel : this.ollamaModel
+    const chain = [preferred, ...LLMHelper.TEXT_FALLBACK_CHAIN.filter(m => m !== preferred)]
 
-    // Local Ollama
-    try {
-      const result = await this.callOllamaModel(this.ollamaUrl, this.ollamaModel, prompt)
-      this.activeModel = this.ollamaModel
-      return result
-    } catch (error) {
-      console.error("[LLMHelper] Error calling local Ollama:", error)
-      throw new Error(`Failed to connect to Ollama: ${error.message}. Make sure Ollama is running on ${this.ollamaUrl}`)
+    for (const model of chain) {
+      try {
+        console.log(`[LLMHelper] Trying text model: ${model}`)
+        const result = await this.callOllamaModel(this.ollamaUrl, model, prompt)
+        this.activeModel = model
+        if (model !== preferred) {
+          console.log(`[LLMHelper] Fallback success: ${model}`)
+        }
+        return result
+      } catch (err) {
+        console.warn(`[LLMHelper] ${model} failed: ${err.message}`)
+        errors.push(`${model}: ${err.message}`)
+      }
     }
+    throw new Error(`All text models failed:\n${errors.join('\n')}`)
+  }
+
+  private async callOpenRouterVision(model: string, prompt: string, images: string[]): Promise<string> {
+    const content: any[] = [{ type: "text", text: prompt }]
+    for (const img of images) {
+      content.push({
+        type: "image_url",
+        image_url: { url: `data:image/jpeg;base64,${img}` }
+      })
+    }
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 180_000)
+    try {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${this.openRouterApiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content }],
+        }),
+        signal: controller.signal,
+      })
+      if (!response.ok) {
+        throw new Error(`OpenRouter ${response.status} ${response.statusText}`)
+      }
+      const data = await response.json()
+      return data.choices[0].message.content
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error(`OpenRouter request timed out after 180s (model: ${model})`)
+      }
+      throw error
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  private async callVisionWithFallback(prompt: string, images: string[]): Promise<string> {
+    const errors: string[] = []
+    for (const { model, provider } of LLMHelper.VISION_FALLBACK_CHAIN) {
+      try {
+        console.log(`[LLMHelper] Trying vision model: ${model} (${provider})`)
+        if (provider === "openrouter") {
+          const result = await this.callOpenRouterVision(model, prompt, images)
+          this.activeModel = model
+          return result
+        }
+        const result = await this.callOllamaModel(this.ollamaUrl, model, prompt, images)
+        this.activeModel = model
+        if (model !== LLMHelper.VISION_FALLBACK_CHAIN[0].model) {
+          console.log(`[LLMHelper] Vision fallback success: ${model}`)
+        }
+        return result
+      } catch (err) {
+        console.warn(`[LLMHelper] Vision ${model} failed: ${err.message}`)
+        errors.push(`${model}: ${err.message}`)
+      }
+    }
+    throw new Error(`All 3 vision models failed:\n${errors.join('\n')}`)
   }
 
   private async checkOllamaAvailable(): Promise<boolean> {
@@ -141,7 +210,7 @@ export class LLMHelper {
       const images = this.readImagesAsBase64(imagePaths)
       const prompt = `${this.systemPrompt}\n\nYou are a wingman. The user has shared ${imagePaths.length} screenshot(s). Please analyze the attached images and extract the following information in JSON format:\n{\n  "problem_statement": "A clear statement of the problem or situation depicted in the images.",\n  "context": "Relevant background or context from the images.",\n  "suggested_responses": ["First possible answer or action", "Second possible answer or action", "..."],\n  "reasoning": "Explanation of why these suggestions are appropriate."\n}\nImportant: Return ONLY the JSON object, without any markdown formatting or code blocks.`
       const text = this.cleanJsonResponse(
-        await this.callOllamaModel(this.ollamaUrl, "qwen3-vl:235b-cloud", prompt, images)
+        await this.callVisionWithFallback(prompt, images)
       )
       return JSON.parse(text)
     } catch (error) {
@@ -169,7 +238,7 @@ export class LLMHelper {
       const images = this.readImagesAsBase64(debugImagePaths)
       const prompt = `${this.systemPrompt}\n\nYou are a wingman. Given:\n1. The original problem or situation: ${JSON.stringify(problemInfo, null, 2)}\n2. The current response or approach: ${currentCode}\n3. The attached ${debugImagePaths.length} debug screenshot(s).\n\nPlease analyze and provide feedback in this JSON format:\n{\n  "solution": {\n    "code": "The code or main answer here.",\n    "problem_statement": "Restate the problem or situation.",\n    "context": "Relevant background/context.",\n    "suggested_responses": ["First possible answer or action", "Second possible answer or action", "..."],\n    "reasoning": "Explanation of why these suggestions are appropriate."\n  }\n}\nImportant: Return ONLY the JSON object, without any markdown formatting or code blocks.`
       const text = this.cleanJsonResponse(
-        await this.callOllamaModel(this.ollamaUrl, "qwen3-vl:235b-cloud", prompt, images)
+        await this.callVisionWithFallback(prompt, images)
       )
       const parsed = JSON.parse(text)
       console.log("[LLMHelper] Parsed debug LLM response:", parsed)
@@ -206,7 +275,7 @@ export class LLMHelper {
     try {
       const images = this.readImagesAsBase64([imagePath])
       const prompt = `${this.systemPrompt}\n\nThe user has shared a screenshot. Analyze what is shown in the image and suggest several possible actions or responses the user could take next. Be concise and helpful.`
-      const text = await this.callOllamaModel(this.ollamaUrl, "qwen3-vl:235b-cloud", prompt, images)
+      const text = await this.callVisionWithFallback(prompt, images)
       return { text, timestamp: Date.now() }
     } catch (error) {
       console.error("Error analyzing image file:", error)
@@ -229,8 +298,8 @@ export class LLMHelper {
 
   public async chatWithVision(message: string, images: string[]): Promise<string> {
     const prompt = `${this.systemPrompt}\n\n${message}`
-    console.log(`[LLMHelper] Vision request: ${images.length} images, model: qwen3-vl:235b-cloud`)
-    return this.callOllamaModel(this.ollamaUrl, "qwen3-vl:235b-cloud", prompt, images)
+    console.log(`[LLMHelper] Vision request: ${images.length} images`)
+    return this.callVisionWithFallback(prompt, images)
   }
 
   public isUsingOllama(): boolean {

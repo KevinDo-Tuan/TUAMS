@@ -9,8 +9,14 @@ import {
   ToastMessage
 } from "../components/ui/toast"
 import QueueCommands from "../components/Queue/QueueCommands"
-import ModelSelector from "../components/ui/ModelSelector"
 import MarkdownMessage from "../components/Chat/MarkdownMessage"
+
+const THINKING_WORDS = [
+  "Cooking up", "Locking in", "On it", "Lowkey grinding",
+  "Pulling up", "Tapping in", "Running it", "Dialing in",
+  "Mapping it out", "Building out", "Crunching", "Scanning",
+  "Linking up", "Loading up", "Firing up", "Piecing together"
+]
 
 interface QueueProps {
   setView: React.Dispatch<React.SetStateAction<"queue" | "solutions" | "debug">>
@@ -34,10 +40,11 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
   const [isChatOpen, setIsChatOpen] = useState(false)
   const chatInputRef = useRef<HTMLInputElement>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
-  const [pendingAttachment, setPendingAttachment] = useState<{ transcript: string; frames: string[] } | null>(null)
+  const [pendingAttachment, setPendingAttachment] = useState<{ transcript: string; frames: string[]; type?: 'recording' | 'screenshot' | 'pdf'; fileName?: string } | null>(null)
 
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [currentModel, setCurrentModel] = useState<{ provider: string; model: string }>({ provider: "ollama", model: "mixtral:8x7b" })
+  const [allModels, setAllModels] = useState<string[]>([])
+  const [thinkingWord, setThinkingWord] = useState("")
 
   const barRef = useRef<HTMLDivElement>(null)
 
@@ -96,7 +103,9 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     if (!userText && !attachment) return
 
     const displayText = attachment
-      ? `[Video] ${userText || 'Analyze this recording'}`
+      ? attachment.type === 'pdf'
+        ? `📄 ${attachment.fileName} attached${userText ? ` — ${userText}` : ''}`
+        : `Recording attached${userText ? ` — ${userText}` : ''}`
       : userText
 
     setChatMessages((msgs) => [...msgs, { role: "user", text: displayText }])
@@ -107,9 +116,17 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     try {
       let response: string
       if (attachment) {
-        const prompt = userText
-          ? `${userText}\n\nAudio transcript from recording:\n"${attachment.transcript}"\n\nThe attached images are frames captured from the screen during recording.`
-          : `The user recorded their screen while speaking. Audio transcript:\n"${attachment.transcript}"\n\nThe attached images are frames from the screen recording. Analyze what is shown and provide a helpful response.`
+        let prompt: string
+        if (attachment.type === 'pdf') {
+          const textContext = attachment.transcript ? attachment.transcript.slice(0, 8000) : ''
+          prompt = userText
+            ? `${userText}\n\nThe user attached a PDF "${attachment.fileName}". Extracted text:\n"${textContext}"\n\nThe attached images are rendered pages from the PDF.`
+            : `The user attached a PDF "${attachment.fileName}". Extracted text:\n"${textContext}"\n\nThe attached images are rendered pages. Analyze the content and provide a helpful response.`
+        } else {
+          prompt = userText
+            ? `${userText}\n\nAudio transcript from recording:\n"${attachment.transcript}"\n\nThe attached images are frames captured from the screen during recording.`
+            : `The user recorded their screen while speaking. Audio transcript:\n"${attachment.transcript}"\n\nThe attached images are frames from the screen recording. Analyze what is shown and provide a helpful response.`
+        }
         response = await (window.electronAPI as any).chatWithVision(prompt, attachment.frames)
       } else {
         response = await window.electronAPI.invoke("ai-chat", userText)
@@ -128,17 +145,30 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatMessages, chatLoading])
 
-  // Load current model configuration on mount
+  // Cycle thinking words while loading
   useEffect(() => {
-    const loadCurrentModel = async () => {
+    if (!chatLoading) return
+    const pick = () => THINKING_WORDS[Math.floor(Math.random() * THINKING_WORDS.length)]
+    setThinkingWord(pick())
+    const interval = setInterval(() => setThinkingWord(pick()), 2000)
+    return () => clearInterval(interval)
+  }, [chatLoading])
+
+  // Load current model config and available models on mount
+  useEffect(() => {
+    const load = async () => {
       try {
-        const config = await window.electronAPI.getCurrentLlmConfig();
-        setCurrentModel({ provider: config.provider, model: config.model });
+        const [config, models] = await Promise.all([
+          window.electronAPI.getCurrentLlmConfig(),
+          window.electronAPI.getAvailableOllamaModels(),
+        ])
+        setCurrentModel({ provider: config.provider, model: config.model })
+        setAllModels(models)
       } catch (error) {
-        console.error('Error loading current model config:', error);
+        console.error('Error loading model config:', error)
       }
-    };
-    loadCurrentModel();
+    }
+    load()
   }, []);
 
   useEffect(() => {
@@ -212,7 +242,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
       await refetch();
       if (data?.preview) {
         const base64 = data.preview.replace(/^data:image\/\w+;base64,/, '')
-        setPendingAttachment({ transcript: '', frames: [base64] })
+        setPendingAttachment({ transcript: '', frames: [base64], type: 'screenshot' })
         setIsChatOpen(true)
         setTimeout(() => chatInputRef.current?.focus(), 50)
       }
@@ -229,10 +259,6 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
 
   const handleChatToggle = () => {
     setIsChatOpen(!isChatOpen)
-  }
-
-  const handleSettingsToggle = () => {
-    setIsSettingsOpen(!isSettingsOpen)
   }
 
   const handleVoiceMessage = async (text: string) => {
@@ -252,16 +278,39 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
 
   const handleScreenRecordingMessage = (transcript: string, frames: string[]) => {
     setIsChatOpen(true)
-    setPendingAttachment({ transcript, frames })
+    setPendingAttachment({ transcript, frames, type: 'recording' })
     setTimeout(() => chatInputRef.current?.focus(), 50)
   }
 
-  const handleModelChange = (provider: "ollama" | "cloud", model: string) => {
-    setCurrentModel({ provider, model })
-    setChatMessages((msgs) => [...msgs, {
-      role: "ai",
-      text: `Switched to ${model}. Ready for your questions!`
-    }])
+  const handleAttachPdf = async () => {
+    const result = await (window.electronAPI as any).openPdfDialog()
+    if (!result) return
+    if ('error' in result) {
+      setChatMessages(msgs => [...msgs, { role: "ai", text: `Error: ${result.error}` }])
+      return
+    }
+    setPendingAttachment({
+      transcript: result.text,
+      frames: result.images,
+      type: 'pdf',
+      fileName: result.fileName,
+    })
+    setIsChatOpen(true)
+    setTimeout(() => chatInputRef.current?.focus(), 50)
+  }
+
+  const handleModelSwitch = async (model: string) => {
+    const isCloud = model.endsWith(':cloud')
+    try {
+      if (isCloud) {
+        await window.electronAPI.switchToCloud(model)
+      } else {
+        await window.electronAPI.switchToOllama(model)
+      }
+      setCurrentModel({ provider: isCloud ? 'cloud' : 'ollama', model })
+    } catch (err) {
+      console.error('Error switching model:', err)
+    }
   }
 
 
@@ -291,30 +340,22 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
               screenshots={screenshots}
               onTooltipVisibilityChange={handleTooltipVisibilityChange}
               onChatToggle={handleChatToggle}
-              onSettingsToggle={handleSettingsToggle}
               onVoiceMessage={handleVoiceMessage}
               onScreenRecordingMessage={handleScreenRecordingMessage}
             />
           </div>
-          {/* Settings Panel */}
-          {isSettingsOpen && (
-            <div className="mt-3 w-full mx-auto animate-slide-up">
-              <ModelSelector onModelChange={handleModelChange} onChatOpen={() => setIsChatOpen(true)} />
-            </div>
-          )}
-
           {/* Chat Interface */}
           {isChatOpen && (
             <div className="mt-3 w-full mx-auto liquid-glass chat-container p-4 flex flex-col">
               {/* Messages Area */}
-              <div className="flex-1 overflow-y-auto mb-3 p-3 rounded-xl glass-content max-h-64 min-h-[120px] border border-red-200/30 bg-white/50 shadow-inner">
+              <div className="flex-1 overflow-y-auto mb-3 p-3 rounded-xl glass-content max-h-64 min-h-[120px] border border-[hsla(12,78%,50%,0.12)] bg-[hsla(225,25%,9%,0.7)] shadow-inner">
                 {chatMessages.length === 0 ? (
                   <div className="text-center mt-6 space-y-2 animate-fade-in">
-                    <div className="text-sm text-red-800/60 font-medium tracking-tight">
+                    <div className="text-sm text-red-200/70 font-medium tracking-tight">
                       {currentModel.model}
                     </div>
-                    <div className="text-[11px] text-red-600/40">
-                      Ctrl+Shift+H to screenshot &middot; Models to switch
+                    <div className="text-[11px] text-red-300/40">
+                       Select model below
                     </div>
                   </div>
                 ) : (
@@ -340,10 +381,11 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                 {chatLoading && (
                   <div className="flex justify-start mb-2 animate-fade-in">
                     <div className="chat-bubble-ai px-4 py-3 mr-8">
-                      <span className="inline-flex items-center gap-1.5">
-                        <span className="loading-dot w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
-                        <span className="loading-dot w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
-                        <span className="loading-dot w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
+                      <span className="inline-flex items-center gap-2">
+                        <span className="sun-pop">&#9728;</span>
+                        <span className="text-[11px] text-red-200/60 font-medium tracking-wide animate-thinking-word">
+                          {thinkingWord}...
+                        </span>
                       </span>
                     </div>
                   </div>
@@ -355,7 +397,11 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                 <div className="mx-2 mb-1 ml-auto p-2 rounded-lg bg-white/5 border border-white/10 animate-fade-in max-w-[70%]">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-medium text-red-200/80">
-                      Video attached, type your prompt
+                      {pendingAttachment.type === 'pdf'
+                        ? "You pdf is attached, On my way to deliver."
+                        : pendingAttachment.type === 'screenshot'
+                        ? "Screenshot is successfully attached."
+                        : "Video is successfully attached mate."}
                     </span>
                     <button
                       type="button"
@@ -377,16 +423,34 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                   onChange={e => setChatInput(e.target.value)}
                   disabled={chatLoading}
                 />
+                <select
+                  className="glass-input px-1.5 py-2.5 text-[10px] max-w-[100px] text-center truncate appearance-none cursor-pointer"
+                  value={currentModel.model}
+                  onChange={e => handleModelSwitch(e.target.value)}
+                  disabled={chatLoading}
+                >
+                  {allModels.map(m => <option key={m} value={m}>{m.replace(':cloud', ' ☁')}</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleAttachPdf}
+                  className="glass-btn p-2 flex items-center justify-center"
+                  disabled={chatLoading}
+                  title="Attach PDF"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+                  </svg>
+                </button>
                 <button
                   type="submit"
-                  className="btn-primary p-2.5 rounded-xl flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none"
+                  className="dawn-btn group relative p-2.5 rounded-xl flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
                   disabled={chatLoading || (!chatInput.trim() && !pendingAttachment)}
                   tabIndex={-1}
                   aria-label="Send"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="white" className="w-3.5 h-3.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-7.5-15-7.5v6l10 1.5-10 1.5v6z" />
-                  </svg>
+                  <span className="sun-pop text-base leading-none">&#9728;</span>
+                  <span className="dawn-tooltip">Dawn it</span>
                 </button>
               </form>
             </div>

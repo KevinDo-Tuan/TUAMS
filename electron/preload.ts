@@ -48,6 +48,7 @@ interface ElectronAPI {
   getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>
   transcribeAudio: (audioBase64: string) => Promise<{ success: boolean; text?: string; error?: string }>
   chatWithVision: (message: string, images: string[]) => Promise<string>
+  openPdfDialog: () => Promise<{ fileName: string; pageCount: number; text: string; images: string[] } | { error: string } | null>
   invoke: (channel: string, ...args: any[]) => Promise<any>
 }
 
@@ -212,5 +213,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getDesktopSources: () => ipcRenderer.invoke("get-desktop-sources"),
   transcribeAudio: (audioBase64: string) => ipcRenderer.invoke("transcribe-audio", audioBase64),
   chatWithVision: (message: string, images: string[]) => ipcRenderer.invoke("ai-chat-vision", message, images),
+  openPdfDialog: () => ipcRenderer.invoke("open-pdf-dialog"),
   invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args)
 } as ElectronAPI)

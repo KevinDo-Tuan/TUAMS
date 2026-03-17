@@ -41,6 +41,7 @@ interface ElectronAPI {
   getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>
   transcribeAudio: (audioBase64: string) => Promise<{ success: boolean; text?: string; error?: string }>
   chatWithVision: (message: string, images: string[]) => Promise<string>
+  openPdfDialog: () => Promise<{ fileName: string; pageCount: number; text: string; images: string[] } | { error: string } | null>
 
   invoke: (channel: string, ...args: any[]) => Promise<any>
 }

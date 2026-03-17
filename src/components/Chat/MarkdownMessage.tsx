@@ -26,7 +26,7 @@ const MarkdownMessage: React.FC<MarkdownMessageProps> = ({ content }) => {
                   padding: "0.75em",
                   borderRadius: "0.5rem",
                   fontSize: "11.5px",
-                  background: "hsla(220, 40%, 6%, 0.85)",
+                  background: "hsla(225, 30%, 7%, 0.92)",
                 }}
                 wrapLongLines={true}
               >

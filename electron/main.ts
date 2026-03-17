@@ -283,6 +283,33 @@ async function initializeApp() {
     console.warn("[App] Could not start ollama serve:", err)
   }
 
+  // Auto-pull required models in background (non-blocking)
+  const modelsToEnsure = [
+    "glm-5:cloud",
+    "gpt-oss:20b-cloud",
+    "llama3.3:cloud",
+    "qwen2.5:cloud",
+    "mixtral:8x7b",
+    "qwen3-vl:235b-cloud",
+    "qwen3.5:cloud",
+  ]
+  // Wait a bit for ollama serve to be ready, then pull models sequentially
+  setTimeout(async () => {
+    for (const model of modelsToEnsure) {
+      try {
+        const pull = spawn("ollama", ["pull", model], {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true
+        })
+        pull.unref()
+        console.log(`[App] Started pulling model: ${model}`)
+      } catch (err) {
+        console.warn(`[App] Could not pull ${model}:`, err)
+      }
+    }
+  }, 3000)
+
   // Initialize IPC handlers before window creation
   initializeIpcHandlers(appState)
 
