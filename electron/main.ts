@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, powerMonitor, session } from "electron"
 import { spawn } from "child_process"
+import path from "path"
 import { initializeIpcHandlers } from "./ipcHandlers"
 import { WindowHelper } from "./WindowHelper"
 import { ScreenshotHelper } from "./ScreenshotHelper"
@@ -182,19 +183,16 @@ export class AppState {
   }
 
   public createTray(): void {
-    // Create a simple tray icon
-    const image = nativeImage.createEmpty()
-    
-    // Try to use a system template image for better integration
-    let trayImage = image
+    const iconPath = path.join(app.isPackaged ? process.resourcesPath : path.join(__dirname, '..'), 'assets', 'tray-icon.png')
+    let trayImage: Electron.NativeImage
     try {
-      // Create a minimal icon - just use an empty image and set the title
-      trayImage = nativeImage.createFromBuffer(Buffer.alloc(0))
+      trayImage = nativeImage.createFromPath(iconPath)
+      trayImage = trayImage.resize({ width: 16, height: 16 })
     } catch (error) {
-      console.log("Using empty tray image")
+      console.log("Tray icon not found, using empty image")
       trayImage = nativeImage.createEmpty()
     }
-    
+
     this.tray = new Tray(trayImage)
     
     const contextMenu = Menu.buildFromTemplate([

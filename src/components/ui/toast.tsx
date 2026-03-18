@@ -35,11 +35,11 @@ interface ToastProps
 
 const toastVariants: Record<ToastVariant, string> = {
   neutral:
-    "bg-[hsla(12,80%,50%,0.9)] backdrop-blur-md text-white border border-[hsla(12,80%,55%,0.3)] shadow-lg shadow-[hsla(12,80%,50%,0.2)]",
+    "bg-[hsla(200,85%,45%,0.9)] backdrop-blur-md text-white border border-[hsla(200,85%,55%,0.3)] shadow-lg shadow-[hsla(200,85%,45%,0.2)]",
   success:
     "bg-teal-500/90 backdrop-blur-md text-white border border-teal-400/30 shadow-lg shadow-teal-500/15",
   error:
-    "backdrop-blur-md text-white border shadow-lg bg-[hsla(350,72%,48%,0.9)] border-[hsla(350,72%,48%,0.3)] shadow-[hsla(350,72%,48%,0.15)]"
+    "backdrop-blur-md text-white border shadow-lg bg-[hsla(0,72%,50%,0.9)] border-[hsla(0,72%,55%,0.3)] shadow-[hsla(0,72%,50%,0.15)]"
 }
 
 const Toast = React.forwardRef<

@@ -356,11 +356,11 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
   return (
     <div className="w-fit">
-      <div className="text-xs liquid-glass-bar py-1 px-3 flex items-center justify-center gap-2.5 draggable-area">
+      <div className="text-xs liquid-glass-bar aura py-1 px-3 flex items-center justify-center gap-2.5 draggable-area">
 
         {/* Show/Hide */}
         <div className="flex items-center gap-1.5 group/cmd">
-          <span className="text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
+          <span className="text-[11px] leading-none text-[hsl(0,0%,8%)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
             Show/Hide
           </span>
           <div className="flex gap-0.5">
@@ -368,11 +368,11 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           </div>
         </div>
 
-        <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/20 to-transparent" />
+        <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
 
         {/* Screenshot */}
         <div className="flex items-center gap-1.5 group/cmd">
-          <span className="text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
+          <span className="text-[11px] leading-none text-[hsl(0,0%,8%)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
             Screenshot
           </span>
           <div className="flex gap-0.5">
@@ -383,9 +383,9 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         {/* Solve */}
         {screenshots.length > 0 && (
           <>
-            <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/20 to-transparent" />
+            <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
             <div className="flex items-center gap-1.5 group/cmd animate-fade-in">
-              <span className="text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
+              <span className="text-[11px] leading-none text-[hsl(0,0%,8%)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
                 Solve
               </span>
               <div className="flex gap-0.5">
@@ -395,7 +395,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           </>
         )}
 
-        <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/20 to-transparent" />
+        <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
 
         {/* Mic Recording */}
         <button
@@ -451,15 +451,15 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
               ? 'bg-white/15 border-white/15'
               : 'bg-white/8 hover:bg-white/15 border-white/5 hover:border-white/10'
           }`}>
-            <span className="text-[10px] text-red-200/70">?</span>
+            <span className="text-[10px] text-[hsl(0,0%,12%)]">?</span>
           </div>
         </button>
 
-        <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/20 to-transparent" />
+        <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
 
         {/* Quit */}
         <button
-          className="text-red-400/60 hover:text-red-300 transition-all duration-200 hover:scale-110"
+          className="text-[hsl(0,0%,15%)] hover:text-[hsl(0,0%,15%)] transition-all duration-200 hover:scale-110"
           title="Quit"
           onClick={() => window.electronAPI.quitApp()}
         >
@@ -470,8 +470,8 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       {/* Shortcuts panel */}
       {isTooltipVisible && (
         <div ref={tooltipRef} className="mt-2 w-72 z-50 animate-slide-up">
-          <div className="p-3.5 text-xs liquid-glass-dark text-red-100/90 shadow-2xl">
-            <h3 className="font-semibold text-red-200 mb-3 text-[13px]">Keyboard Shortcuts</h3>
+          <div className="p-3.5 text-xs liquid-glass-dark text-[hsl(0,0%,8%)] shadow-2xl">
+            <h3 className="font-semibold text-[hsl(0,0%,10%)] mb-3 text-[13px]">Keyboard Shortcuts</h3>
             <div className="space-y-2.5">
               {[
                 { label: 'Toggle Window', keys: ['Ctrl', 'B'], desc: 'Show or hide this window' },
@@ -484,8 +484,8 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
               ].map(({ label, keys, desc }) => (
                 <div key={label} className="flex items-start justify-between gap-3 group/item">
                   <div>
-                    <div className="font-medium text-red-200 group-hover/item:text-red-100 transition-colors duration-200">{label}</div>
-                    <div className="text-[10px] text-red-300/50 mt-0.5">{desc}</div>
+                    <div className="font-medium text-[hsl(0,0%,10%)] group-hover/item:text-[hsl(0,0%,8%)] transition-colors duration-200">{label}</div>
+                    <div className="text-[10px] text-[hsl(0,0%,30%)] mt-0.5">{desc}</div>
                   </div>
                   <div className="flex gap-1 flex-shrink-0 mt-0.5">
                     {keys.map((k) => (
@@ -501,17 +501,17 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
       {/* Record status panel */}
       {recordStatus !== null && (
-        <div className="mt-2 liquid-glass-dark p-3 text-red-100 text-xs max-w-md animate-slide-up">
-          <span className="font-semibold text-red-300">
+        <div className="mt-2 liquid-glass-dark p-3 text-[hsl(0,0%,8%)] text-xs max-w-md animate-slide-up">
+          <span className="font-semibold text-[hsl(0,0%,15%)]">
             {isRecording ? 'Recording...' : recordStatus.startsWith('Error') ? 'Error' : 'Processing'}
           </span>{' '}
-          <span className={recordStatus.startsWith('Error') ? 'text-[hsla(0,72%,65%,0.9)]' : 'text-red-100/80'}>
+          <span className={recordStatus.startsWith('Error') ? 'text-[hsla(0,72%,65%,0.9)]' : 'text-[hsl(0,0%,8%)]/80'}>
             {recordStatus}
           </span>
           {isRecording && (
             <div className="mt-1.5 flex items-center gap-1.5">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-[hsl(0,72%,60%)] animate-pulse" />
-              <span className="text-[10px] text-red-300/50">Click Stop to finish recording</span>
+              <span className="text-[10px] text-[hsl(0,0%,30%)]">Click Stop to finish recording</span>
             </div>
           )}
         </div>
@@ -519,7 +519,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
       {/* Listen status panel */}
       {listenStatus !== null && (
-        <div className="mt-2 liquid-glass-dark p-3 text-red-100 text-xs max-w-md animate-slide-up">
+        <div className="mt-2 liquid-glass-dark p-3 text-[hsl(0,0%,8%)] text-xs max-w-md animate-slide-up">
           <div className="flex items-center gap-2 mb-1.5">
             <span className="font-semibold text-teal-400">
               {isListening ? 'Listening' : listenStatus.startsWith('Error') ? 'Error' : listenStatus.startsWith('Transcript') ? 'Done' : 'Processing'}
@@ -535,11 +535,11 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
               </>
             )}
           </div>
-          <div className={`leading-relaxed ${listenStatus.startsWith('Error') ? 'text-[hsla(0,72%,65%,0.9)]' : 'text-red-100/80'}`}>
+          <div className={`leading-relaxed ${listenStatus.startsWith('Error') ? 'text-[hsla(0,72%,65%,0.9)]' : 'text-[hsl(0,0%,8%)]/80'}`}>
             {listenStatus}
           </div>
           {isListening && (
-            <div className="mt-2 text-[10px] text-red-300/40">
+            <div className="mt-2 text-[10px] text-[hsl(0,0%,15%)]/40">
               Press Stop to transcribe & send to AI
             </div>
           )}

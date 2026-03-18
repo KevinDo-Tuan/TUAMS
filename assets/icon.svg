@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="core" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0a0a14"/>
+      <stop offset="60%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#0d1117"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="hsl(200,85%,65%)" stop-opacity="0.4"/>
+      <stop offset="50%" stop-color="hsl(200,80%,50%)" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="transparent" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <circle cx="256" cy="256" r="256" fill="#0d1117"/>
+
+  <!-- Outer glow -->
+  <circle cx="256" cy="256" r="240" fill="url(#glow)"/>
+
+  <!-- Spiral arms - vortex pattern -->
+  <g transform="translate(256,256)">
+    <!-- Arm 1 -->
+    <path d="M 0,-180 C 80,-170 160,-100 170,-20 C 180,60 120,130 40,150 C -40,170 -110,120 -130,50 C -150,-20 -100,-80 -40,-90 C 20,-100 60,-60 60,-10 C 60,30 30,50 0,50"
+          fill="none" stroke="hsl(200,85%,65%)" stroke-width="28" stroke-linecap="round" opacity="0.9"/>
+
+    <!-- Arm 2 -->
+    <path d="M 0,180 C -80,170 -160,100 -170,20 C -180,-60 -120,-130 -40,-150 C 40,-170 110,-120 130,-50 C 150,20 100,80 40,90 C -20,100 -60,60 -60,10 C -60,-30 -30,-50 0,-50"
+          fill="none" stroke="hsl(200,85%,65%)" stroke-width="28" stroke-linecap="round" opacity="0.9"/>
+
+    <!-- Arm 3 -->
+    <path d="M -180,0 C -170,-80 -100,-160 -20,-170 C 60,-180 130,-120 150,-40 C 170,40 120,110 50,130 C -20,150 -80,100 -90,40 C -100,-20 -60,-60 -10,-60 C 30,-60 50,-30 50,0"
+          fill="none" stroke="hsl(195,90%,70%)" stroke-width="22" stroke-linecap="round" opacity="0.7"/>
+
+    <!-- Arm 4 -->
+    <path d="M 180,0 C 170,80 100,160 20,170 C -60,180 -130,120 -150,40 C -170,-40 -120,-110 -50,-130 C 20,-150 80,-100 90,-40 C 100,20 60,60 10,60 C -30,60 -50,30 -50,0"
+          fill="none" stroke="hsl(195,90%,70%)" stroke-width="22" stroke-linecap="round" opacity="0.7"/>
+
+    <!-- Core dark circle -->
+    <circle cx="0" cy="0" r="35" fill="#0a0a14"/>
+
+    <!-- Core bright ring -->
+    <circle cx="0" cy="0" r="38" fill="none" stroke="hsl(200,85%,70%)" stroke-width="3" opacity="0.6"/>
+
+    <!-- Inner glow -->
+    <circle cx="0" cy="0" r="20" fill="hsl(200,90%,75%)" opacity="0.15"/>
+  </g>
+</svg>

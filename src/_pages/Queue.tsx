@@ -346,15 +346,15 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
           </div>
           {/* Chat Interface */}
           {isChatOpen && (
-            <div className="mt-3 w-full mx-auto liquid-glass chat-container p-4 flex flex-col">
+            <div className="mt-3 w-full mx-auto liquid-glass chat-container aura-strong p-4 flex flex-col">
               {/* Messages Area */}
-              <div className="flex-1 overflow-y-auto mb-3 p-3 rounded-xl glass-content max-h-64 min-h-[120px] border border-[hsla(12,78%,50%,0.12)] bg-[hsla(225,25%,9%,0.7)] shadow-inner">
+              <div className="flex-1 overflow-y-auto mb-3 p-3 rounded-xl glass-content max-h-64 min-h-[120px] border border-[hsla(210,20%,70%,0.2)] bg-[hsla(210,20%,97%,0.5)] shadow-inner chat-vortex-bg">
                 {chatMessages.length === 0 ? (
                   <div className="text-center mt-6 space-y-2 animate-fade-in">
-                    <div className="text-sm text-red-200/70 font-medium tracking-tight">
+                    <div className="text-sm text-[hsla(210,25%,15%,0.6)] font-medium tracking-tight">
                       {currentModel.model}
                     </div>
-                    <div className="text-[11px] text-red-300/40">
+                    <div className="text-[11px] text-[hsla(210,20%,25%,0.35)]">
                        Select model below
                     </div>
                   </div>
@@ -383,7 +383,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                     <div className="chat-bubble-ai px-4 py-3 mr-8">
                       <span className="inline-flex items-center gap-2">
                         <span className="sun-pop">&#9728;</span>
-                        <span className="text-[11px] text-red-200/60 font-medium tracking-wide animate-thinking-word">
+                        <span className="text-[11px] text-[hsl(0,0%,8%)] font-medium tracking-wide animate-thinking-word">
                           {thinkingWord}...
                         </span>
                       </span>
@@ -394,9 +394,9 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
               </div>
               {/* Attachment Preview */}
               {pendingAttachment && (
-                <div className="mx-2 mb-1 ml-auto p-2 rounded-lg bg-white/5 border border-white/10 animate-fade-in max-w-[70%]">
+                <div className="mx-2 mb-1 ml-auto p-2 rounded-lg bg-[hsla(210,20%,96%,0.1)] border border-[hsla(200,65%,45%,0.12)] animate-fade-in max-w-[70%]">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-medium text-red-200/80">
+                    <span className="text-[10px] font-medium text-[hsla(210,25%,15%,0.7)]">
                       {pendingAttachment.type === 'pdf'
                         ? "You pdf is attached, On my way to deliver."
                         : pendingAttachment.type === 'screenshot'
@@ -405,7 +405,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                     </span>
                     <button
                       type="button"
-                      className="text-[10px] text-red-400/60 hover:text-red-300 transition-colors ml-3"
+                      className="text-[10px] text-[hsla(200,70%,40%,0.6)] hover:text-[hsla(200,70%,50%,0.9)] transition-colors ml-3"
                       onClick={() => setPendingAttachment(null)}
                     >
                       Remove
