@@ -1,7 +1,22 @@
 import { globalShortcut, app, BrowserWindow, clipboard } from "electron"
-import { execSync } from "child_process"
-import * as path from "path"
 import { AppState } from "./main"
+
+// Native Win32 FFI for keyboard simulation (replaces slow PowerShell SendKeys)
+let keybd_event: ((vk: number, scan: number, flags: number, extra: number) => void) | null = null
+if (process.platform === "win32") {
+  try {
+    const koffi = require("koffi")
+    const user32 = koffi.load("user32.dll")
+    keybd_event = user32.func("void keybd_event(uint8_t bVk, uint8_t bScan, uint32_t dwFlags, uintptr_t dwExtraInfo)")
+  } catch (err) {
+    console.warn("[Shortcuts] koffi not available for SendKeys:", err)
+  }
+}
+
+const VK_CONTROL = 0x11
+const VK_A = 0x41
+const VK_C = 0x43
+const KEYEVENTF_KEYUP = 0x02
 
 export class ShortcutsHelper {
   private appState: AppState
@@ -70,18 +85,25 @@ export class ShortcutsHelper {
       if (!mainWindow || mainWindow.isDestroyed()) return
 
       try {
-        // Simulate Ctrl+A then Ctrl+C on the foreground window (e.g. Azota)
-        const psExe = path.join(
-          process.env.SystemRoot || "C:\\Windows",
-          "System32", "WindowsPowerShell", "v1.0", "powershell.exe"
-        )
-        execSync(
-          `"${psExe}" -NoProfile -NonInteractive -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^a'); Start-Sleep -Milliseconds 150; [System.Windows.Forms.SendKeys]::SendWait('^c')"`,
-          { windowsHide: true, timeout: 5000 }
-        )
+        // Simulate Ctrl+A then Ctrl+C using native keybd_event (<1ms vs 1000ms+ PowerShell)
+        if (keybd_event) {
+          // Ctrl+A (select all)
+          keybd_event(VK_CONTROL, 0, 0, 0)
+          keybd_event(VK_A, 0, 0, 0)
+          keybd_event(VK_A, 0, KEYEVENTF_KEYUP, 0)
+          keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+
+          await new Promise(resolve => setTimeout(resolve, 50))
+
+          // Ctrl+C (copy)
+          keybd_event(VK_CONTROL, 0, 0, 0)
+          keybd_event(VK_C, 0, 0, 0)
+          keybd_event(VK_C, 0, KEYEVENTF_KEYUP, 0)
+          keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+        }
 
         // Wait for clipboard to populate
-        await new Promise(resolve => setTimeout(resolve, 200))
+        await new Promise(resolve => setTimeout(resolve, 50))
 
         const text = clipboard.readText()
         if (!text || !text.trim()) {
@@ -100,6 +122,10 @@ export class ShortcutsHelper {
       } catch (error) {
         console.error("[Shortcuts] Ctrl+Shift+K error:", error)
       }
+    })
+
+    register("CommandOrControl+Shift+G", () => {
+      this.appState.toggleStealthMode()
     })
 
     register("CommandOrControl+B", () => {

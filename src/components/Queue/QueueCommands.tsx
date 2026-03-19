@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react"
-import { IoLogOutOutline } from "react-icons/io5"
+import { IoLogOutOutline, IoSunnyOutline, IoMoonOutline } from "react-icons/io5"
 
 interface QueueCommandsProps {
   onTooltipVisibilityChange: (visible: boolean, height: number) => void
@@ -17,6 +17,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   onScreenRecordingMessage
 }) => {
   const [isTooltipVisible, setIsTooltipVisible] = useState(false)
+  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'))
   const tooltipRef = useRef<HTMLDivElement>(null)
 
   // Screen + mic recording state
@@ -30,12 +31,17 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const framesCapturedRef = useRef<string[]>([])
   const frameIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Listen mode state (live transcription via Windows Speech Recognition)
+  // Listen mode state (system audio + mic capture → chunked transcription)
   const [isListening, setIsListening] = useState(false)
   const [listenStatus, setListenStatus] = useState<string | null>(null)
   const [listenElapsed, setListenElapsed] = useState(0)
   const listenStreamRef = useRef<MediaStream | null>(null)
   const listenTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const listenRecorderRef = useRef<MediaRecorder | null>(null)
+  const listenAudioCtxRef = useRef<AudioContext | null>(null)
+  const listenSystemStreamRef = useRef<MediaStream | null>(null)
+  const listenMicStreamRef = useRef<MediaStream | null>(null)
+  const listenTranscriptRef = useRef<string>("")
 
   useEffect(() => {
     let tooltipHeight = 0
@@ -52,7 +58,16 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       recStreamRef.current?.getTracks().forEach(t => t.stop())
       screenStreamRef.current?.getTracks().forEach(t => t.stop())
       if (frameIntervalRef.current) clearInterval(frameIntervalRef.current)
+      // Listen cleanup
+      if (listenRecorderRef.current && listenRecorderRef.current.state !== 'inactive') {
+        try { listenRecorderRef.current.stop() } catch {}
+      }
+      listenSystemStreamRef.current?.getTracks().forEach(t => t.stop())
+      listenMicStreamRef.current?.getTracks().forEach(t => t.stop())
       listenStreamRef.current?.getTracks().forEach(t => t.stop())
+      if (listenAudioCtxRef.current && listenAudioCtxRef.current.state !== 'closed') {
+        try { listenAudioCtxRef.current.close() } catch {}
+      }
       if (listenTimerRef.current) clearInterval(listenTimerRef.current)
     }
   }, [])
@@ -160,9 +175,14 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         return
       }
 
-      // 2. Get screen video stream (for live frame capture, NOT recording)
+      // 2. Get screen video + system audio stream
       const screenStream = await (navigator.mediaDevices as any).getUserMedia({
-        audio: false,
+        audio: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: screenSource.id
+          }
+        },
         video: {
           mandatory: {
             chromeMediaSource: 'desktop',
@@ -179,14 +199,22 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       video.play()
       screenVideoRef.current = video
 
-      // 4. Get mic audio stream and record audio only
+      // 4. Get mic audio + mix with system audio
       const micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
       recStreamRef.current = micStream
+
+      // Mix system + mic audio via AudioContext
+      const recAudioCtx = new AudioContext()
+      const recDest = recAudioCtx.createMediaStreamDestination()
+      if (screenStream.getAudioTracks().length > 0) {
+        recAudioCtx.createMediaStreamSource(screenStream).connect(recDest)
+      }
+      recAudioCtx.createMediaStreamSource(micStream).connect(recDest)
 
       recChunksRef.current = []
       framesCapturedRef.current = []
 
-      const recorder = new MediaRecorder(micStream)
+      const recorder = new MediaRecorder(recDest.stream)
       recorderRef.current = recorder
 
       recorder.ondataavailable = (e) => {
@@ -208,9 +236,10 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           }
         }
 
-        // Stop streams
+        // Stop streams and close AudioContext
         screenStream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
         micStream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+        try { recAudioCtx.close() } catch {}
         screenStreamRef.current = null
         recStreamRef.current = null
         screenVideoRef.current = null
@@ -258,6 +287,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         if (frameIntervalRef.current) clearInterval(frameIntervalRef.current)
         screenStream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
         micStream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+        try { recAudioCtx.close() } catch {}
         setTimeout(() => setRecordStatus(null), 3000)
       }
 
@@ -287,67 +317,138 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     }
   }
 
-  // ── Listen (live transcription via Windows Speech Recognition) ──
+  // ── Listen (system audio + mic → chunked transcription) ──
+  const stopListenStreams = () => {
+    if (listenRecorderRef.current && listenRecorderRef.current.state !== 'inactive') {
+      try { listenRecorderRef.current.stop() } catch {}
+    }
+    listenRecorderRef.current = null
+    listenSystemStreamRef.current?.getTracks().forEach(t => t.stop())
+    listenSystemStreamRef.current = null
+    listenMicStreamRef.current?.getTracks().forEach(t => t.stop())
+    listenMicStreamRef.current = null
+    listenStreamRef.current?.getTracks().forEach(t => t.stop())
+    listenStreamRef.current = null
+    if (listenAudioCtxRef.current && listenAudioCtxRef.current.state !== 'closed') {
+      try { listenAudioCtxRef.current.close() } catch {}
+    }
+    listenAudioCtxRef.current = null
+    if (listenTimerRef.current) {
+      clearInterval(listenTimerRef.current)
+      listenTimerRef.current = null
+    }
+  }
+
   const handleListenClick = async () => {
     if (isListening) {
-      // Stop: get accumulated text and send to AI
-      if (listenTimerRef.current) {
-        clearInterval(listenTimerRef.current)
-        listenTimerRef.current = null
-      }
+      // ── Stop ──
       setIsListening(false)
+      stopListenStreams()
 
-      try {
-        const result: { success: boolean; text?: string } =
-          await window.electronAPI.invoke("stop-live-transcription")
-        const text = result.text?.trim()
-        if (text) {
-          onVoiceMessage(text)
-          setListenStatus(`Sent: ${text}`)
-          setTimeout(() => setListenStatus(null), 3000)
-        } else {
-          setListenStatus("No speech detected")
-          setTimeout(() => setListenStatus(null), 3000)
-        }
-      } catch {
-        setListenStatus("Error stopping transcription")
+      const text = listenTranscriptRef.current.trim()
+      listenTranscriptRef.current = ""
+      setListenElapsed(0)
+
+      if (text) {
+        onVoiceMessage(text)
+        setListenStatus(`Sent transcript`)
+        setTimeout(() => setListenStatus(null), 3000)
+      } else {
+        setListenStatus("No speech detected")
         setTimeout(() => setListenStatus(null), 3000)
       }
-      setListenElapsed(0)
       return
     }
 
+    // ── Start ──
     try {
-      // Start live transcription in main process
-      const startResult: { success: boolean; error?: string } =
-        await window.electronAPI.invoke("start-live-transcription")
-      if (!startResult.success) {
-        setListenStatus(`Error: ${startResult.error}`)
-        setTimeout(() => setListenStatus(null), 4000)
+      // 1. Get a screen source for system audio loopback
+      const sources = await (window.electronAPI as any).getDesktopSources()
+      const screenSource = sources.find((s: any) => s.id.startsWith('screen:'))
+      if (!screenSource) {
+        setListenStatus('No screen source found')
+        setTimeout(() => setListenStatus(null), 3000)
         return
       }
 
-      setIsListening(true)
-      setListenElapsed(0)
-      setListenStatus("Listening...")
-
-      // Listen for live transcript updates
-      const cleanup = (window.electronAPI as any).onLiveTranscript((data: { type: string; text: string }) => {
-        if (data.text) {
-          setListenStatus(data.text)
+      // 2. Capture system audio (must request video too on Windows, discard it immediately)
+      const systemStream = await (navigator.mediaDevices as any).getUserMedia({
+        audio: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: screenSource.id
+          }
+        },
+        video: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: screenSource.id
+          }
         }
       })
-      listenStreamRef.current = { getTracks: () => [{ stop: cleanup }] } as any
+      // Discard video tracks — we only need audio
+      systemStream.getVideoTracks().forEach((t: MediaStreamTrack) => t.stop())
+      listenSystemStreamRef.current = systemStream
+
+      // 3. Capture mic audio
+      const micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      listenMicStreamRef.current = micStream
+
+      // 4. Mix system + mic audio via AudioContext
+      const audioCtx = new AudioContext()
+      listenAudioCtxRef.current = audioCtx
+      const dest = audioCtx.createMediaStreamDestination()
+      audioCtx.createMediaStreamSource(systemStream).connect(dest)
+      audioCtx.createMediaStreamSource(micStream).connect(dest)
+
+      // 5. Record mixed stream in 10-second chunks
+      listenTranscriptRef.current = ""
+      const recorder = new MediaRecorder(dest.stream)
+      listenRecorderRef.current = recorder
+
+      recorder.ondataavailable = async (e) => {
+        if (e.data.size === 0) return
+        try {
+          const text = await transcribeBlob(e.data)
+          if (text.trim()) {
+            listenTranscriptRef.current += (listenTranscriptRef.current ? " " : "") + text.trim()
+            setListenStatus(listenTranscriptRef.current)
+          }
+        } catch (err) {
+          console.warn("[Listen] Chunk transcription failed:", err)
+        }
+      }
+
+      recorder.onerror = () => {
+        setListenStatus('Recording error')
+        setIsListening(false)
+        stopListenStreams()
+        setTimeout(() => setListenStatus(null), 3000)
+      }
+
+      recorder.start(10000) // 10-second chunks
+      setIsListening(true)
+      setListenElapsed(0)
+      setListenStatus("Listening to system audio + mic...")
 
       // Elapsed timer
       listenTimerRef.current = setInterval(() => {
         setListenElapsed(prev => prev + 1)
       }, 1000)
+
     } catch (err: any) {
-      console.error("Live transcription error:", err)
+      console.error("Listen error:", err)
+      stopListenStreams()
       setListenStatus(`Error: ${err.message}`)
       setTimeout(() => setListenStatus(null), 4000)
     }
+  }
+
+  const toggleTheme = () => {
+    const next = !isDark
+    setIsDark(next)
+    document.documentElement.classList.toggle('dark', next)
+    localStorage.setItem('theme', next ? 'dark' : 'light')
   }
 
   const Kbd = ({ children }: { children: React.ReactNode }) => (
@@ -360,7 +461,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
         {/* Show/Hide */}
         <div className="flex items-center gap-1.5 group/cmd">
-          <span className="text-[11px] leading-none text-[hsl(0,0%,8%)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
+          <span className="cmd-label text-[11px] leading-none text-[hsla(0, 2%, 10%, 0.00)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
             Show/Hide
           </span>
           <div className="flex gap-0.5">
@@ -370,9 +471,21 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
         <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
 
+        {/* Stealth Mode */}
+        <div className="flex items-center gap-1.5 group/cmd">
+          <span className="cmd-label text-[11px] leading-none text-[hsl(0,0%,8%)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
+            Stealth
+          </span>
+          <div className="flex gap-0.5">
+            <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>G</Kbd>
+          </div>
+        </div>
+
+        <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
+
         {/* Screenshot */}
         <div className="flex items-center gap-1.5 group/cmd">
-          <span className="text-[11px] leading-none text-[hsl(0,0%,8%)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
+          <span className="cmd-label text-[11px] leading-none text-[hsl(0,0%,8%)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
             Screenshot
           </span>
           <div className="flex gap-0.5">
@@ -385,7 +498,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           <>
             <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
             <div className="flex items-center gap-1.5 group/cmd animate-fade-in">
-              <span className="text-[11px] leading-none text-[hsl(0,0%,8%)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
+              <span className="cmd-label text-[11px] leading-none text-[hsl(0,0%,8%)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
                 Solve
               </span>
               <div className="flex gap-0.5">
@@ -399,7 +512,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
         {/* Mic Recording */}
         <button
-          className={`glass-btn flex items-center gap-1.5 transition-all duration-300 ${
+          className={`glass-btn glass-btn-record flex items-center gap-1.5 transition-all duration-300 ${
             isRecording
               ? 'bg-[hsla(0,72%,51%,0.3)] border-[hsla(0,72%,51%,0.4)] text-white animate-glow'
               : ''
@@ -423,7 +536,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           }`}
           onClick={handleListenClick}
           type="button"
-          title="Listen and show transcript, sends to AI on stop"
+          title="Listen and show transcript. After press stop, it will be sent to AI"
         >
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3 h-3">
             <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
@@ -440,6 +553,20 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           Chat
         </button>
 
+        {/* Theme toggle */}
+        <button
+          className="w-5 h-5 rounded-full bg-white/8 hover:bg-white/15 transition-all duration-200 flex items-center justify-center border border-white/5 hover:border-white/10 interactive"
+          title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+          onClick={toggleTheme}
+          type="button"
+        >
+          {isDark ? (
+            <IoSunnyOutline className="w-3 h-3 bar-icon" />
+          ) : (
+            <IoMoonOutline className="w-3 h-3 bar-icon" />
+          )}
+        </button>
+
         {/* Help toggle */}
         <button
           className="inline-block interactive"
@@ -451,7 +578,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
               ? 'bg-white/15 border-white/15'
               : 'bg-white/8 hover:bg-white/15 border-white/5 hover:border-white/10'
           }`}>
-            <span className="text-[10px] text-[hsl(0,0%,12%)]">?</span>
+            <span className="text-[10px] bar-icon">?</span>
           </div>
         </button>
 
@@ -459,7 +586,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
         {/* Quit */}
         <button
-          className="text-[hsl(0,0%,15%)] hover:text-[hsl(0,0%,15%)] transition-all duration-200 hover:scale-110"
+          className="bar-icon transition-all duration-200 hover:scale-110"
           title="Quit"
           onClick={() => window.electronAPI.quitApp()}
         >
@@ -475,6 +602,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
             <div className="space-y-2.5">
               {[
                 { label: 'Toggle Window', keys: ['Ctrl', 'B'], desc: 'Show or hide this window' },
+                { label: 'Stealth', keys: ['Ctrl', 'Shift', 'G'], desc: 'Hide from screen share' },
                 { label: 'Screenshot', keys: ['Ctrl', 'Shift', 'H'], desc: 'Capture current screen' },
                 { label: 'Solve', keys: ['Ctrl', 'Shift', 'Enter'], desc: 'Generate solution from screenshots' },
                 { label: 'Reset', keys: ['Ctrl', 'Shift', 'R'], desc: 'Clear all screenshots & reset' },

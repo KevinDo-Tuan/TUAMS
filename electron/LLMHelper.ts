@@ -17,11 +17,11 @@ export const OLLAMA_CLOUD_MODELS = [
 
 export class LLMHelper {
   private readonly systemPrompt = `You are Wingman AI, a helpful, proactive assistant for any kind of problem or situation (not just coding). For any user input, analyze the situation, provide a clear problem statement, relevant context, and suggest several possible responses or actions the user could take next. Always explain your reasoning. Present your suggestions as a list of options or next steps.`
-  private useCloud: boolean = false
+  private useCloud: boolean = true
   private ollamaModel: string = "mixtral:8x7b"
   private ollamaUrl: string = "http://localhost:11434"
   private cloudModel: string = "glm-5:cloud"
-  private activeModel: string = "mixtral:8x7b"
+  private activeModel: string = "glm-5:cloud"
   private readonly openRouterApiKey = process.env.OPENROUTER_API_KEY || "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"
 
   // Text chat fallback chain: cloud first → local
@@ -43,7 +43,10 @@ export class LLMHelper {
   constructor(_apiKey?: string, _useOllama: boolean = true, ollamaModel?: string, ollamaUrl?: string) {
     this.ollamaUrl = ollamaUrl || "http://localhost:11434"
     this.ollamaModel = ollamaModel || "mixtral:8x7b"
-    console.log(`[LLMHelper] Using Ollama with model: ${this.ollamaModel}`)
+    // Default to cloud model, fall back to local if cloud unavailable
+    this.useCloud = true
+    this.activeModel = this.cloudModel
+    console.log(`[LLMHelper] Default model: ${this.activeModel} (cloud)`)
     this.initializeOllamaModel()
   }
 
@@ -189,10 +192,13 @@ export class LLMHelper {
       }
       if (!availableModels.includes(this.ollamaModel)) {
         this.ollamaModel = availableModels[0]
-        console.log(`[LLMHelper] Auto-selected first available model: ${this.ollamaModel}`)
+        console.log(`[LLMHelper] Auto-selected first available local model: ${this.ollamaModel}`)
       }
-      this.activeModel = this.ollamaModel
-      console.log(`[LLMHelper] Ready with model: ${this.ollamaModel}`)
+      // Don't override activeModel if already set to cloud
+      if (!this.useCloud) {
+        this.activeModel = this.ollamaModel
+      }
+      console.log(`[LLMHelper] Ready with model: ${this.activeModel}`)
     } catch (error) {
       console.error(`[LLMHelper] Failed to initialize Ollama model: ${error.message}`)
     }

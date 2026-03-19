@@ -26,6 +26,7 @@ interface ElectronAPI {
   onUnauthorized: (callback: () => void) => () => void
   onFocusChat: (callback: () => void) => () => void
   onClipboardChat: (callback: (text: string) => void) => () => void
+  onStealthModeChanged: (callback: (enabled: boolean) => void) => () => void
   onDebugError: (callback: (error: string) => void) => () => void
   takeScreenshot: () => Promise<void>
   moveWindowLeft: () => Promise<void>
@@ -49,6 +50,8 @@ interface ElectronAPI {
   transcribeAudio: (audioBase64: string) => Promise<{ success: boolean; text?: string; error?: string }>
   chatWithVision: (message: string, images: string[]) => Promise<string>
   openPdfDialog: () => Promise<{ fileName: string; pageCount: number; text: string; images: string[] } | { error: string } | null>
+  getWindowBounds: () => Promise<{ x: number; y: number; width: number; height: number } | null>
+  setWindowBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<void>
   invoke: (channel: string, ...args: any[]) => Promise<any>
 }
 
@@ -73,6 +76,9 @@ export const PROCESSING_EVENTS = {
 contextBridge.exposeInMainWorld("electronAPI", {
   updateContentDimensions: (dimensions: { width: number; height: number }) =>
     ipcRenderer.invoke("update-content-dimensions", dimensions),
+  getWindowBounds: () => ipcRenderer.invoke("get-window-bounds"),
+  setWindowBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
+    ipcRenderer.invoke("set-window-bounds", bounds),
   takeScreenshot: () => ipcRenderer.invoke("take-screenshot"),
   getScreenshots: () => ipcRenderer.invoke("get-screenshots"),
   deleteScreenshot: (path: string) =>
@@ -187,6 +193,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const subscription = (_: any, text: string) => callback(text)
     ipcRenderer.on("clipboard-chat", subscription)
     return () => { ipcRenderer.removeListener("clipboard-chat", subscription) }
+  },
+  onStealthModeChanged: (callback: (enabled: boolean) => void) => {
+    const subscription = (_: any, enabled: boolean) => callback(enabled)
+    ipcRenderer.on("stealth-mode-changed", subscription)
+    return () => { ipcRenderer.removeListener("stealth-mode-changed", subscription) }
   },
   onLiveTranscript: (callback: (data: { type: string; text: string }) => void) => {
     const subscription = (_: any, data: { type: string; text: string }) => callback(data)

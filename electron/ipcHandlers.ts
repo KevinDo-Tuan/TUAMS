@@ -7,34 +7,6 @@ import * as path from "path"
 import * as fs from "fs"
 import * as os from "os"
 
-async function renderPdfToImages(buffer: Buffer, pageCount: number): Promise<string[]> {
-  const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js")
-  const { createCanvas } = require("canvas")
-
-  const data = new Uint8Array(buffer)
-  const doc = await pdfjsLib.getDocument({ data, useSystemFonts: true }).promise
-  const images: string[] = []
-
-  for (let i = 1; i <= pageCount; i++) {
-    const page = await doc.getPage(i)
-    const scale = 1.5
-    const viewport = page.getViewport({ scale })
-    const canvas = createCanvas(viewport.width, viewport.height)
-    const ctx = canvas.getContext("2d")
-
-    await page.render({
-      canvasContext: ctx,
-      viewport,
-    }).promise
-
-    // Export as JPEG base64 (no data URL prefix)
-    const jpegBuffer = canvas.toBuffer("image/jpeg", { quality: 0.75 })
-    images.push(jpegBuffer.toString("base64"))
-  }
-
-  return images
-}
-
 export function initializeIpcHandlers(appState: AppState): void {
   ipcMain.handle(
     "update-content-dimensions",
@@ -42,6 +14,21 @@ export function initializeIpcHandlers(appState: AppState): void {
       if (width && height) {
         appState.setWindowDimensions(width, height)
       }
+    }
+  )
+
+  ipcMain.handle("get-window-bounds", async () => {
+    const win = appState.getMainWindow()
+    if (!win || win.isDestroyed()) return null
+    return win.getBounds()
+  })
+
+  ipcMain.handle(
+    "set-window-bounds",
+    async (event, bounds: { x: number; y: number; width: number; height: number }) => {
+      const win = appState.getMainWindow()
+      if (!win || win.isDestroyed()) return
+      win.setBounds(bounds)
     }
   )
 
@@ -167,17 +154,26 @@ export function initializeIpcHandlers(appState: AppState): void {
       const pdfPath = result.filePaths[0]
       const buffer = fs.readFileSync(pdfPath)
 
-      // Extract text
-      const pdfParse = require("pdf-parse")
-      const pdfData = await pdfParse(buffer)
-      const pageCount = pdfData.numpages
+      // Extract text and render images (pdf-parse v2 API)
+      const { PDFParse } = require("pdf-parse")
+      const parser = new PDFParse({ data: buffer })
+      const pdfData = await parser.getText()
+      const pageCount = pdfData.total
 
       if (pageCount > 30) {
+        await parser.destroy()
         return { error: `PDF has ${pageCount} pages (max 30)` }
       }
 
-      // Render pages to images using pdfjs-dist + canvas
-      const images = await renderPdfToImages(buffer, pageCount)
+      const screenshotResult = await parser.getScreenshot({ scale: 1.5 })
+      await parser.destroy()
+
+      const images = screenshotResult.pages.map((page: any) => {
+        if (page.dataUrl) {
+          return page.dataUrl.replace(/^data:image\/\w+;base64,/, "")
+        }
+        return page.data.toString("base64")
+      })
 
       return {
         fileName: path.basename(pdfPath),
@@ -500,11 +496,11 @@ ${csCode}
         liveTranscriptionProcess.stdin?.write("\n")
         liveTranscriptionProcess.stdin?.end()
       } catch {}
-      // Force kill after 2s if still alive
+      // Force kill after 1s if still alive
       const proc = liveTranscriptionProcess
       setTimeout(() => {
         try { proc?.kill() } catch {}
-      }, 2000)
+      }, 1000)
       liveTranscriptionProcess = null
     }
     const result = liveTranscriptAccumulated

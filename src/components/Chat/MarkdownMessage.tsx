@@ -1,6 +1,9 @@
 import React from "react"
 import ReactMarkdown from "react-markdown"
 import rehypeRaw from "rehype-raw"
+import remarkMath from "remark-math"
+import rehypeKatex from "rehype-katex"
+import "katex/dist/katex.min.css"
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
 import { dracula } from "react-syntax-highlighter/dist/esm/styles/prism"
 
@@ -11,7 +14,8 @@ interface MarkdownMessageProps {
 const MarkdownMessage: React.FC<MarkdownMessageProps> = ({ content }) => {
   return (
     <ReactMarkdown
-      rehypePlugins={[rehypeRaw]}
+      remarkPlugins={[remarkMath]}
+      rehypePlugins={[rehypeRaw, rehypeKatex]}
       components={{
         code({ className, children, ...props }) {
           const match = /language-(\w+)/.exec(className || "")

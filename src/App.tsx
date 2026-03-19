@@ -1,7 +1,7 @@
 import { ToastProvider } from "./components/ui/toast"
 import Queue from "./_pages/Queue"
 import { ToastViewport } from "@radix-ui/react-toast"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Solutions from "./_pages/Solutions"
 import { QueryClient, QueryClientProvider } from "react-query"
 
@@ -56,6 +56,9 @@ declare global {
       switchToCloud: (url?: string, apiKey?: string) => Promise<{ success: boolean; error?: string }>
       testLlmConnection: () => Promise<{ success: boolean; error?: string }>
       
+      getWindowBounds: () => Promise<{ x: number; y: number; width: number; height: number } | null>
+      setWindowBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<void>
+      onStealthModeChanged: (callback: (enabled: boolean) => void) => () => void
       invoke: (channel: string, ...args: any[]) => Promise<any>
     }
   }
@@ -74,6 +77,14 @@ const App: React.FC = () => {
   const [view, setView] = useState<"queue" | "solutions" | "debug">("queue")
   const containerRef = useRef<HTMLDivElement>(null)
 
+  // Apply saved theme synchronously before first paint
+  useState(() => {
+    const savedTheme = localStorage.getItem('theme')
+    if (savedTheme === 'dark') {
+      document.documentElement.classList.add('dark')
+    }
+  })
+
   // Effect for height monitoring
   useEffect(() => {
     const cleanup = window.electronAPI.onResetView(() => {
@@ -90,43 +101,59 @@ const App: React.FC = () => {
     }
   }, [])
 
+  // Size window once on view switch only — no continuous resizing
   useEffect(() => {
     if (!containerRef.current) return
+    const height = containerRef.current.offsetHeight
+    const width = containerRef.current.offsetWidth
+    window.electronAPI?.updateContentDimensions({ width, height })
+  }, [view])
 
-    const updateHeight = () => {
-      if (!containerRef.current) return
-      const height = containerRef.current.scrollHeight
-      const width = containerRef.current.scrollWidth
-      window.electronAPI?.updateContentDimensions({ width, height })
-    }
+  // Resize handler for frameless window edge dragging
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent, direction: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.screenX
+    const startY = e.screenY
+    let bounds: { x: number; y: number; width: number; height: number } | null = null
 
-    const resizeObserver = new ResizeObserver(() => {
-      updateHeight()
+    window.electronAPI?.getWindowBounds?.().then((b: any) => {
+      if (!b) return
+      bounds = b
+
+      const onMouseMove = (ev: MouseEvent) => {
+        if (!bounds) return
+        const dx = ev.screenX - startX
+        const dy = ev.screenY - startY
+        const newBounds = { ...bounds }
+
+        if (direction.includes('s')) {
+          newBounds.height = Math.max(300, bounds.height + dy)
+        }
+        if (direction.includes('n')) {
+          newBounds.y = bounds.y + dy
+          newBounds.height = Math.max(300, bounds.height - dy)
+        }
+        if (direction.includes('e')) {
+          newBounds.width = Math.max(300, bounds.width + dx)
+        }
+        if (direction.includes('w')) {
+          newBounds.x = bounds.x + dx
+          newBounds.width = Math.max(300, bounds.width - dx)
+        }
+
+        window.electronAPI?.setWindowBounds?.(newBounds)
+      }
+
+      const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove)
+        document.removeEventListener('mouseup', onMouseUp)
+      }
+
+      document.addEventListener('mousemove', onMouseMove)
+      document.addEventListener('mouseup', onMouseUp)
     })
-
-    // Initial height update
-    updateHeight()
-
-    // Observe for changes
-    resizeObserver.observe(containerRef.current)
-
-    // Also update height when view changes
-    const mutationObserver = new MutationObserver(() => {
-      updateHeight()
-    })
-
-    mutationObserver.observe(containerRef.current, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      characterData: true
-    })
-
-    return () => {
-      resizeObserver.disconnect()
-      mutationObserver.disconnect()
-    }
-  }, [view]) // Re-run when view changes
+  }, [])
 
   useEffect(() => {
     const cleanupFunctions = [
@@ -164,7 +191,17 @@ const App: React.FC = () => {
   }, [])
 
   return (
-    <div ref={containerRef} className="min-h-0">
+    <div ref={containerRef} className="min-h-0 relative h-screen flex flex-col">
+      {/* Resize handles for frameless window */}
+      <div className="resize-handle resize-n" onMouseDown={e => handleResizeMouseDown(e, 'n')} />
+      <div className="resize-handle resize-s" onMouseDown={e => handleResizeMouseDown(e, 's')} />
+      <div className="resize-handle resize-e" onMouseDown={e => handleResizeMouseDown(e, 'e')} />
+      <div className="resize-handle resize-w" onMouseDown={e => handleResizeMouseDown(e, 'w')} />
+      <div className="resize-handle resize-ne" onMouseDown={e => handleResizeMouseDown(e, 'ne')} />
+      <div className="resize-handle resize-nw" onMouseDown={e => handleResizeMouseDown(e, 'nw')} />
+      <div className="resize-handle resize-se" onMouseDown={e => handleResizeMouseDown(e, 'se')} />
+      <div className="resize-handle resize-sw" onMouseDown={e => handleResizeMouseDown(e, 'sw')} />
+
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
           {view === "queue" ? (

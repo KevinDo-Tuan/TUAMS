@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react"
-import { IoLogOutOutline } from "react-icons/io5"
+import { IoLogOutOutline, IoSunnyOutline, IoMoonOutline } from "react-icons/io5"
 
 interface SolutionCommandsProps {
   extraScreenshots: any[]
@@ -11,6 +11,7 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
   onTooltipVisibilityChange
 }) => {
   const [isTooltipVisible, setIsTooltipVisible] = useState(false)
+  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'))
   const tooltipRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -22,6 +23,13 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
       onTooltipVisibilityChange(isTooltipVisible, tooltipHeight)
     }
   }, [isTooltipVisible, onTooltipVisibilityChange])
+
+  const toggleTheme = () => {
+    const next = !isDark
+    setIsDark(next)
+    document.documentElement.classList.toggle('dark', next)
+    localStorage.setItem('theme', next ? 'dark' : 'light')
+  }
 
   const handleMouseEnter = () => {
     setIsTooltipVisible(true)
@@ -38,7 +46,7 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
 
           {/* Show/Hide */}
           <div className="flex items-center gap-1.5 group/cmd">
-            <span className="text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
+            <span className="cmd-label text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
               Show/Hide
             </span>
             <div className="flex gap-0.5">
@@ -51,7 +59,7 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
 
           {/* Screenshot */}
           <div className="flex items-center gap-1.5 group/cmd">
-            <span className="text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
+            <span className="cmd-label text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
               {extraScreenshots.length === 0 ? "Screenshot your code" : "Screenshot"}
             </span>
             <div className="flex gap-0.5">
@@ -65,7 +73,7 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
             <>
               <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/20 to-transparent" />
               <div className="flex items-center gap-1.5 group/cmd animate-fade-in">
-                <span className="text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
+                <span className="cmd-label text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
                   Debug
                 </span>
                 <div className="flex gap-0.5">
@@ -81,7 +89,7 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
 
           {/* Start Over */}
           <div className="flex items-center gap-1.5 group/cmd">
-            <span className="text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
+            <span className="cmd-label text-[11px] leading-none text-red-200/80 font-medium transition-colors duration-200 group-hover/cmd:text-red-100">
               Start over
             </span>
             <div className="flex gap-0.5">
@@ -93,6 +101,21 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
 
           <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/20 to-transparent" />
 
+          {/* Theme toggle */}
+          <button
+            className="w-5 h-5 rounded-full bg-white/8 hover:bg-white/15 transition-all duration-200 flex items-center justify-center border border-white/5 hover:border-white/10 interactive"
+            title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            onClick={toggleTheme}
+          >
+            {isDark ? (
+              <IoSunnyOutline className="w-3 h-3 bar-icon" />
+            ) : (
+              <IoMoonOutline className="w-3 h-3 bar-icon" />
+            )}
+          </button>
+
+          <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/20 to-transparent" />
+
           {/* Help tooltip */}
           <div
             className="relative inline-block interactive"
@@ -100,7 +123,7 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
             onMouseLeave={handleMouseLeave}
           >
             <div className="w-5 h-5 rounded-full bg-white/8 hover:bg-white/15 transition-all duration-200 flex items-center justify-center cursor-help border border-white/5 hover:border-white/10">
-              <span className="text-[10px] text-red-200/70">?</span>
+              <span className="text-[10px] bar-icon">?</span>
             </div>
 
             {isTooltipVisible && (
@@ -141,7 +164,7 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
 
           {/* Quit */}
           <button
-            className="text-red-400/60 hover:text-red-300 transition-all duration-200 hover:scale-110"
+            className="bar-icon transition-all duration-200 hover:scale-110"
             title="Quit"
             onClick={() => window.electronAPI.quitApp()}
           >

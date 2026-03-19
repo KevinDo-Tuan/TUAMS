@@ -2,7 +2,34 @@
 import { BrowserWindow, screen } from "electron"
 import { AppState } from "main"
 import path from "node:path"
-import { execSync } from "child_process"
+
+// Native Win32 FFI for stealth mode (screen capture exclusion)
+let SetWindowDisplayAffinity: ((hwnd: number, affinity: number) => boolean) | null = null
+let GetLastError: (() => number) | null = null
+let GetWindowLongW: ((hwnd: number, nIndex: number) => number) | null = null
+let SetWindowLongW: ((hwnd: number, nIndex: number, dwNewLong: number) => number) | null = null
+const GWL_EXSTYLE = -20
+const WS_EX_LAYERED = 0x00080000
+
+if (process.platform === "win32") {
+  try {
+    const koffi = require("koffi")
+    const user32 = koffi.load("user32.dll")
+    const kernel32 = koffi.load("kernel32.dll")
+    SetWindowDisplayAffinity = user32.func("bool __stdcall SetWindowDisplayAffinity(uintptr_t hwnd, uint32_t affinity)")
+    GetLastError = kernel32.func("uint32_t __stdcall GetLastError()")
+    GetWindowLongW = user32.func("long __stdcall GetWindowLongW(uintptr_t hwnd, int nIndex)")
+    SetWindowLongW = user32.func("long __stdcall SetWindowLongW(uintptr_t hwnd, int nIndex, long dwNewLong)")
+  } catch (err) {
+    console.warn("[WindowHelper] koffi not available, display affinity disabled:", err)
+  }
+}
+
+// Extract HWND value from Electron's getNativeWindowHandle() Buffer
+function readHwnd(buf: Buffer): number {
+  // HWND values always fit in 32 bits even on 64-bit Windows
+  return buf.readUInt32LE(0)
+}
 
 const isDev = process.env.NODE_ENV === "development"
 
@@ -16,6 +43,7 @@ export class WindowHelper {
   private windowPosition: { x: number; y: number } | null = null
   private windowSize: { width: number; height: number } | null = null
   private appState: AppState
+  private stealthMode: boolean = false
 
   // Initialize with explicit number type and 0 value
   private screenWidth: number = 0
@@ -75,10 +103,10 @@ export class WindowHelper {
 
     
     const windowSettings: Electron.BrowserWindowConstructorOptions = {
-      width: 400,
-      height: 600,
+      width: 750,
+      height: 550,
       minWidth: 300,
-      minHeight: 200,
+      minHeight: 300,
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: true,
@@ -90,7 +118,6 @@ export class WindowHelper {
       transparent: true,
       fullscreenable: false,
       hasShadow: false,
-      backgroundColor: "#00000000",
       focusable: true,
       resizable: true,
       movable: true,
@@ -100,14 +127,6 @@ export class WindowHelper {
 
     this.mainWindow = new BrowserWindow(windowSettings)
     // this.mainWindow.webContents.openDevTools()
-
-    // Apply display affinity BEFORE showing, so the window is never visible to capture
-    this.applyDisplayAffinity()
-
-    // Non-Windows: use Electron's content protection (shows black rectangle)
-    if (process.platform !== "win32") {
-      this.mainWindow.setContentProtection(true)
-    }
 
     if (process.platform === "darwin") {
       this.mainWindow.setVisibleOnAllWorkspaces(true, {
@@ -137,8 +156,6 @@ export class WindowHelper {
     this.mainWindow.once('ready-to-show', () => {
       if (this.mainWindow) {
         this.centerWindow()
-        // Reapply display affinity right before show (safety net)
-        this.applyDisplayAffinity()
         this.mainWindow.show()
         this.mainWindow.focus()
         this.mainWindow.setAlwaysOnTop(true, "screen-saver")
@@ -183,36 +200,85 @@ export class WindowHelper {
     })
   }
 
-  // WDA_EXCLUDEFROMCAPTURE (0x11) — makes window completely invisible in screen share
-  // Must be called AFTER window is shown; reapply after every show/hide cycle
+  // Hide window from screen capture on Windows using native FFI
+  // NOTE: We avoid Electron's setContentProtection() as it breaks transparent window rendering
   private applyDisplayAffinity(): void {
     if (!this.mainWindow || this.mainWindow.isDestroyed()) return
     if (process.platform !== "win32") return
 
+    if (!SetWindowDisplayAffinity) {
+      console.warn("[WindowHelper] koffi not available — stealth capture protection unavailable")
+      return
+    }
+
     try {
-      const hwndBuf = this.mainWindow.getNativeWindowHandle()
-      const hwnd = "0x" + hwndBuf.readBigUInt64LE(0).toString(16)
+      const hwnd = readHwnd(this.mainWindow.getNativeWindowHandle())
+      console.log(`[WindowHelper] HWND: 0x${hwnd.toString(16)}`)
 
-      const psExe = path.join(
-        process.env.SystemRoot || "C:\\Windows",
-        "System32", "WindowsPowerShell", "v1.0", "powershell.exe"
-      )
-      const psScript = `Add-Type 'using System;using System.Runtime.InteropServices;public class WDA{[DllImport("user32.dll")]public static extern bool SetWindowDisplayAffinity(IntPtr h,uint a);}'; [WDA]::SetWindowDisplayAffinity([IntPtr]::new(${hwnd}),0x11)`
-
-      const output = execSync(
-        `"${psExe}" -NoProfile -NonInteractive -Command "${psScript.replace(/"/g, '\\"')}"`,
-        { windowsHide: true, encoding: "utf-8", timeout: 5000 }
-      ).trim()
-
-      if (output === "True") {
-        console.log("[WindowHelper] Display affinity set successfully (WDA_EXCLUDEFROMCAPTURE)")
-      } else {
-        console.warn("[WindowHelper] SetWindowDisplayAffinity returned False, falling back to content protection")
-        this.mainWindow.setContentProtection(true)
+      // Try direct call first
+      if (SetWindowDisplayAffinity(hwnd, 0x11)) {
+        console.log("[WindowHelper] WDA_EXCLUDEFROMCAPTURE set (direct)")
+        return
       }
+      const directErr = GetLastError ? GetLastError() : -1
+      console.log(`[WindowHelper] Direct WDA call failed, err=${directErr}. Trying WS_EX_LAYERED workaround...`)
+
+      // Workaround: transparent windows have WS_EX_LAYERED which blocks SetWindowDisplayAffinity.
+      // Temporarily remove it, set affinity, then restore it.
+      if (GetWindowLongW && SetWindowLongW) {
+        const exStyle = GetWindowLongW(hwnd, GWL_EXSTYLE)
+        const isLayered = (exStyle & WS_EX_LAYERED) !== 0
+        console.log(`[WindowHelper] ExStyle: 0x${(exStyle >>> 0).toString(16)}, isLayered: ${isLayered}`)
+
+        if (isLayered) {
+          // Remove WS_EX_LAYERED
+          SetWindowLongW(hwnd, GWL_EXSTYLE, exStyle & ~WS_EX_LAYERED)
+
+          // Set affinity while not layered
+          const success = SetWindowDisplayAffinity(hwnd, 0x11)
+          const err = GetLastError ? GetLastError() : -1
+          console.log(`[WindowHelper] After removing WS_EX_LAYERED: WDA result=${success}, err=${err}`)
+
+          // Restore WS_EX_LAYERED for transparency
+          SetWindowLongW(hwnd, GWL_EXSTYLE, exStyle)
+
+          if (success) {
+            console.log("[WindowHelper] WDA_EXCLUDEFROMCAPTURE set (via layered workaround)")
+            return
+          }
+        }
+      }
+
+      // Final fallback: try WDA_MONITOR
+      if (SetWindowDisplayAffinity(hwnd, 0x01)) {
+        console.log("[WindowHelper] WDA_MONITOR set (black rectangle in capture)")
+        return
+      }
+
+      console.warn("[WindowHelper] All WDA methods failed — stealth capture protection unavailable")
     } catch (err) {
       console.error("[WindowHelper] Failed to set display affinity:", err)
-      this.mainWindow.setContentProtection(true)
+    }
+  }
+
+  // Restore normal display affinity (visible to screen capture)
+  private removeDisplayAffinity(): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+    if (process.platform !== "win32") return
+
+    if (!SetWindowDisplayAffinity) return
+
+    try {
+      const hwnd = readHwnd(this.mainWindow.getNativeWindowHandle())
+      // WDA_NONE (0x00) — normal capture behavior
+      if (SetWindowDisplayAffinity(hwnd, 0x00)) {
+        console.log("[WindowHelper] Display affinity removed: WDA_NONE")
+      } else {
+        const err = GetLastError ? GetLastError() : -1
+        console.warn(`[WindowHelper] Failed to remove display affinity, GetLastError: ${err}`)
+      }
+    } catch (err) {
+      console.error("[WindowHelper] Failed to remove display affinity:", err)
     }
   }
 
@@ -252,8 +318,10 @@ export class WindowHelper {
       })
     }
 
-    this.applyDisplayAffinity()
     this.mainWindow.showInactive()
+    if (this.stealthMode) {
+      this.applyDisplayAffinity()
+    }
 
     this.isWindowVisible = true
   }
@@ -264,6 +332,21 @@ export class WindowHelper {
     } else {
       this.showMainWindow()
     }
+  }
+
+  public toggleStealthMode(): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+
+    this.stealthMode = !this.stealthMode
+    console.log(`[WindowHelper] Stealth mode: ${this.stealthMode ? "ON" : "OFF"}`)
+
+    if (this.stealthMode) {
+      this.applyDisplayAffinity()
+    } else {
+      this.removeDisplayAffinity()
+    }
+
+    this.mainWindow.webContents.send("stealth-mode-changed", this.stealthMode)
   }
 
   private centerWindow(): void {
@@ -305,10 +388,12 @@ export class WindowHelper {
     }
 
     this.centerWindow()
-    this.applyDisplayAffinity()
     this.mainWindow.show()
     this.mainWindow.focus()
     this.mainWindow.setAlwaysOnTop(true, "screen-saver")
+    if (this.stealthMode) {
+      this.applyDisplayAffinity()
+    }
     this.isWindowVisible = true
 
     console.log(`Window centered and shown`)

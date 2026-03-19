@@ -123,6 +123,10 @@ export class AppState {
     this.windowHelper.toggleMainWindow()
   }
 
+  public toggleStealthMode(): void {
+    this.windowHelper.toggleStealthMode()
+  }
+
   public setWindowDimensions(width: number, height: number): void {
     this.windowHelper.setWindowDimensions(width, height)
   }
@@ -306,7 +310,7 @@ async function initializeApp() {
         console.warn(`[App] Could not pull ${model}:`, err)
       }
     }
-  }, 3000)
+  }, 1500)
 
   // Initialize IPC handlers before window creation
   initializeIpcHandlers(appState)
@@ -314,9 +318,9 @@ async function initializeApp() {
   app.whenReady().then(() => {
     console.log("App is ready")
 
-    // Grant microphone permissions for MediaRecorder / getUserMedia
+    // Grant microphone + desktop audio permissions for MediaRecorder / getUserMedia
     session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-      const allowed = ["media", "audioCapture", "mediaKeySystem"]
+      const allowed = ["media", "audioCapture", "mediaKeySystem", "desktopCapture"]
       callback(allowed.includes(permission))
     })
 
