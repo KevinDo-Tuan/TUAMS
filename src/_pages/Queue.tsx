@@ -103,9 +103,9 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     if (!userText && !attachment) return
 
     setChatMessages((msgs) => [...msgs, {
-      role: "user",
+      role: "user" as const,
       text: userText || "...",
-      ...(attachment ? { attachment: { type: attachment.type, fileName: attachment.fileName } } : {})
+      ...(attachment ? { attachment: { type: String(attachment.type), fileName: attachment.fileName } } : {})
     }])
     setChatLoading(true)
     setChatInput("")
