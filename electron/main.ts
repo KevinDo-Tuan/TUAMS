@@ -6,6 +6,12 @@ import { WindowHelper } from "./WindowHelper"
 import { ScreenshotHelper } from "./ScreenshotHelper"
 import { ShortcutsHelper } from "./shortcuts"
 import { ProcessingHelper } from "./ProcessingHelper"
+import {
+  isSherpaModelDownloaded,
+  downloadSherpaModel,
+  isVoskModelDownloaded,
+  downloadVoskModel,
+} from "./StreamingSpeech"
 
 export class AppState {
   private static instance: AppState | null = null
@@ -182,6 +188,10 @@ export class AppState {
     this.windowHelper.moveWindowUp()
   }
 
+  public resizeWindow(dw: number, dh: number): void {
+    this.windowHelper.resizeWindow(dw, dh)
+  }
+
   public centerAndShowWindow(): void {
     this.windowHelper.centerAndShowWindow()
   }
@@ -328,6 +338,34 @@ async function initializeApp() {
     appState.createTray()
     // Register global shortcuts using ShortcutsHelper
     appState.shortcutsHelper.registerGlobalShortcuts()
+
+    // Download speech models in background (non-blocking)
+    ;(async () => {
+      try {
+        if (!isSherpaModelDownloaded()) {
+          console.log("[App] Downloading sherpa-onnx speech model in background...")
+          await downloadSherpaModel((file, pct) => {
+            if (pct % 25 === 0) console.log(`[App] sherpa model: ${file} ${pct}%`)
+          })
+          console.log("[App] sherpa-onnx model download complete")
+        } else {
+          console.log("[App] sherpa-onnx model already downloaded")
+        }
+      } catch (err) {
+        console.warn("[App] sherpa-onnx model download failed:", err)
+      }
+      try {
+        if (!isVoskModelDownloaded()) {
+          console.log("[App] Downloading vosk speech model in background...")
+          await downloadVoskModel()
+          console.log("[App] vosk model download complete")
+        } else {
+          console.log("[App] vosk model already downloaded")
+        }
+      } catch (err) {
+        console.warn("[App] vosk model download failed:", err)
+      }
+    })()
   })
 
   app.on("activate", () => {

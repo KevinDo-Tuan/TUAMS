@@ -6,6 +6,14 @@ import { execFile, spawn, ChildProcess } from "child_process"
 import * as path from "path"
 import * as fs from "fs"
 import * as os from "os"
+import {
+  SherpaEngine,
+  isSherpaModelDownloaded,
+  downloadSherpaModel,
+  isVoskModelDownloaded,
+  downloadVoskModel,
+  getVoskModelTarGz,
+} from "./StreamingSpeech"
 
 export function initializeIpcHandlers(appState: AppState): void {
   ipcMain.handle(
@@ -387,125 +395,99 @@ $rec.Dispose()
     }
   })
 
-  // ── Live transcription (streaming Windows Speech Recognition) ──
-  let liveTranscriptionProcess: ChildProcess | null = null
-  let liveTranscriptAccumulated = ""
+  // ── Streaming Speech-to-Text (sherpa-onnx) ──
+  const sherpaEngine = new SherpaEngine()
 
-  ipcMain.handle("start-live-transcription", async () => {
-    if (liveTranscriptionProcess) {
-      return { success: false, error: "Already running" }
-    }
-    if (process.platform !== "win32") {
-      return { success: false, error: "Live transcription only supported on Windows" }
-    }
+  // Check if sherpa-onnx model is ready
+  ipcMain.handle("stt-check-sherpa", async () => {
+    return { downloaded: isSherpaModelDownloaded() }
+  })
 
-    liveTranscriptAccumulated = ""
-
-    const psExe = path.join(
-      process.env.SystemRoot || "C:\\Windows",
-      "System32", "WindowsPowerShell", "v1.0", "powershell.exe"
-    )
-
-    // C# code that runs continuous speech recognition from default mic
-    // Outputs "PARTIAL:text" and "FINAL:text" lines to stdout
-    const csCode = `
-using System;
-using System.Speech.Recognition;
-public class LiveSR {
-  public static void Start() {
-    var rec = new SpeechRecognitionEngine();
-    rec.LoadGrammar(new DictationGrammar());
-    rec.SetInputToDefaultAudioDevice();
-    rec.SpeechHypothesized += (s, e) => {
-      Console.WriteLine("PARTIAL:" + e.Result.Text);
-      Console.Out.Flush();
-    };
-    rec.SpeechRecognized += (s, e) => {
-      Console.WriteLine("FINAL:" + e.Result.Text);
-      Console.Out.Flush();
-    };
-    rec.RecognizeAsync(RecognizeMode.Multiple);
-    Console.ReadLine();
-    rec.RecognizeAsyncCancel();
-    rec.Dispose();
-  }
-}
-`
-    const psScript = `
-Add-Type -AssemblyName System.Speech
-Add-Type -TypeDefinition @'
-${csCode}
-'@ -ReferencedAssemblies System.Speech
-[LiveSR]::Start()
-`
-
+  // Download sherpa-onnx model
+  ipcMain.handle("stt-download-sherpa", async () => {
     try {
-      const proc = spawn(psExe, ["-NoProfile", "-NonInteractive", "-Command", psScript], {
-        windowsHide: true,
-        stdio: ["pipe", "pipe", "pipe"]
-      })
-      liveTranscriptionProcess = proc
-
-      proc.stdout?.on("data", (data: Buffer) => {
-        const lines = data.toString().split("\n").filter(l => l.trim())
-        for (const line of lines) {
-          const mainWindow = appState.getMainWindow()
-          if (!mainWindow || mainWindow.isDestroyed()) continue
-
-          if (line.startsWith("FINAL:")) {
-            const text = line.slice(6).trim()
-            if (text) {
-              liveTranscriptAccumulated += (liveTranscriptAccumulated ? " " : "") + text
-              mainWindow.webContents.send("live-transcript", { type: "final", text: liveTranscriptAccumulated })
-            }
-          } else if (line.startsWith("PARTIAL:")) {
-            const partial = line.slice(8).trim()
-            if (partial) {
-              const display = liveTranscriptAccumulated + (liveTranscriptAccumulated ? " " : "") + partial
-              mainWindow.webContents.send("live-transcript", { type: "partial", text: display })
-            }
-          }
+      const mainWindow = appState.getMainWindow()
+      await downloadSherpaModel((file, percent) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("stt-download-progress", {
+            engine: "sherpa",
+            file,
+            percent,
+          })
         }
       })
-
-      proc.stderr?.on("data", (data: Buffer) => {
-        console.log("[LiveTranscription] stderr:", data.toString().trim())
-      })
-
-      proc.on("close", () => {
-        liveTranscriptionProcess = null
-      })
-
-      proc.on("error", (err) => {
-        console.error("[LiveTranscription] Process error:", err)
-        liveTranscriptionProcess = null
-      })
-
-      console.log("[LiveTranscription] Started")
       return { success: true }
     } catch (err: any) {
-      console.error("[LiveTranscription] Failed to start:", err)
+      console.error("[STT] Sherpa model download failed:", err.message)
       return { success: false, error: err.message }
     }
   })
 
-  ipcMain.handle("stop-live-transcription", async () => {
-    if (liveTranscriptionProcess) {
-      try {
-        // Send newline to stdin to unblock Console.ReadLine() → graceful shutdown
-        liveTranscriptionProcess.stdin?.write("\n")
-        liveTranscriptionProcess.stdin?.end()
-      } catch {}
-      // Force kill after 1s if still alive
-      const proc = liveTranscriptionProcess
-      setTimeout(() => {
-        try { proc?.kill() } catch {}
-      }, 1000)
-      liveTranscriptionProcess = null
+  // Initialize sherpa-onnx recognizer
+  ipcMain.handle("stt-init-sherpa", async () => {
+    const mainWindow = appState.getMainWindow()
+    if (!mainWindow) return { success: false, error: "No window" }
+    const ok = await sherpaEngine.init(mainWindow)
+    return { success: ok, error: ok ? undefined : "sherpa-onnx init failed" }
+  })
+
+  // Feed audio to sherpa-onnx (Float32 PCM, 16kHz mono, base64-encoded)
+  ipcMain.handle("stt-feed-audio", async (_, base64Float32: string) => {
+    if (!sherpaEngine.isRunning()) return
+    try {
+      const buf = Buffer.from(base64Float32, "base64")
+      const float32 = new Float32Array(
+        buf.buffer,
+        buf.byteOffset,
+        buf.byteLength / 4
+      )
+      sherpaEngine.feedAudio(float32)
+    } catch (err: any) {
+      console.error("[STT] Feed error:", err.message)
     }
-    const result = liveTranscriptAccumulated
-    liveTranscriptAccumulated = ""
-    console.log("[LiveTranscription] Stopped, accumulated:", result)
-    return { success: true, text: result }
+  })
+
+  // Stop sherpa-onnx and get final text
+  ipcMain.handle("stt-stop-sherpa", async () => {
+    const text = sherpaEngine.stop()
+    return { success: true, text }
+  })
+
+  // ── Vosk model management (for vosk-browser fallback in renderer) ──
+
+  // Check if vosk model is downloaded
+  ipcMain.handle("stt-check-vosk", async () => {
+    return { downloaded: isVoskModelDownloaded() }
+  })
+
+  // Download vosk model files
+  ipcMain.handle("stt-download-vosk", async () => {
+    try {
+      const mainWindow = appState.getMainWindow()
+      await downloadVoskModel((file, percent) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("stt-download-progress", {
+            engine: "vosk",
+            file,
+            percent,
+          })
+        }
+      })
+      return { success: true }
+    } catch (err: any) {
+      console.error("[STT] Vosk model download failed:", err.message)
+      return { success: false, error: err.message }
+    }
+  })
+
+  // Get vosk model as tar.gz buffer (for vosk-browser in renderer)
+  ipcMain.handle("stt-get-vosk-targz", async () => {
+    try {
+      const buffer = await getVoskModelTarGz()
+      return { success: true, data: buffer.toString("base64") }
+    } catch (err: any) {
+      console.error("[STT] Vosk tar.gz creation failed:", err.message)
+      return { success: false, error: err.message }
+    }
   })
 }

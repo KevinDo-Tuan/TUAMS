@@ -199,10 +199,30 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("stealth-mode-changed", subscription)
     return () => { ipcRenderer.removeListener("stealth-mode-changed", subscription) }
   },
+  onToggleRecord: (callback: () => void) => {
+    const subscription = () => callback()
+    ipcRenderer.on("toggle-record", subscription)
+    return () => { ipcRenderer.removeListener("toggle-record", subscription) }
+  },
+  onToggleListen: (callback: () => void) => {
+    const subscription = () => callback()
+    ipcRenderer.on("toggle-listen", subscription)
+    return () => { ipcRenderer.removeListener("toggle-listen", subscription) }
+  },
+  onToggleChat: (callback: () => void) => {
+    const subscription = () => callback()
+    ipcRenderer.on("toggle-chat", subscription)
+    return () => { ipcRenderer.removeListener("toggle-chat", subscription) }
+  },
   onLiveTranscript: (callback: (data: { type: string; text: string }) => void) => {
     const subscription = (_: any, data: { type: string; text: string }) => callback(data)
     ipcRenderer.on("live-transcript", subscription)
     return () => { ipcRenderer.removeListener("live-transcript", subscription) }
+  },
+  onSttDownloadProgress: (callback: (data: { engine: string; file: string; percent: number }) => void) => {
+    const subscription = (_: any, data: { engine: string; file: string; percent: number }) => callback(data)
+    ipcRenderer.on("stt-download-progress", subscription)
+    return () => { ipcRenderer.removeListener("stt-download-progress", subscription) }
   },
   moveWindowLeft: () => ipcRenderer.invoke("move-window-left"),
   moveWindowRight: () => ipcRenderer.invoke("move-window-right"),

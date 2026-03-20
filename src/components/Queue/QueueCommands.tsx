@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react"
+import { createPortal } from "react-dom"
 import { IoLogOutOutline, IoSunnyOutline, IoMoonOutline } from "react-icons/io5"
 
 interface QueueCommandsProps {
@@ -7,6 +8,8 @@ interface QueueCommandsProps {
   onChatToggle: () => void
   onVoiceMessage: (text: string) => void
   onScreenRecordingMessage: (transcript: string, frames: string[]) => void
+  actionBarPortalId?: string
+  shortcutsBarPortalId?: string
 }
 
 const QueueCommands: React.FC<QueueCommandsProps> = ({
@@ -14,7 +17,9 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   screenshots,
   onChatToggle,
   onVoiceMessage,
-  onScreenRecordingMessage
+  onScreenRecordingMessage,
+  actionBarPortalId,
+  shortcutsBarPortalId
 }) => {
   const [isTooltipVisible, setIsTooltipVisible] = useState(false)
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'))
@@ -22,6 +27,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
   // Screen + mic recording state
   const [isRecording, setIsRecording] = useState(false)
+  const isRecordingRef = useRef(false)
   const [recordStatus, setRecordStatus] = useState<string | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const recChunksRef = useRef<Blob[]>([])
@@ -31,17 +37,22 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const framesCapturedRef = useRef<string[]>([])
   const frameIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Listen mode state (system audio + mic capture → chunked transcription)
+  // Listen mode state
   const [isListening, setIsListening] = useState(false)
+  const isListeningRef = useRef(false)
   const [listenStatus, setListenStatus] = useState<string | null>(null)
   const [listenElapsed, setListenElapsed] = useState(0)
-  const listenStreamRef = useRef<MediaStream | null>(null)
   const listenTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const listenRecorderRef = useRef<MediaRecorder | null>(null)
   const listenAudioCtxRef = useRef<AudioContext | null>(null)
   const listenSystemStreamRef = useRef<MediaStream | null>(null)
   const listenMicStreamRef = useRef<MediaStream | null>(null)
+  const listenProcessorRef = useRef<ScriptProcessorNode | null>(null)
+  const listenRecorderRef = useRef<MediaRecorder | null>(null)
   const listenTranscriptRef = useRef<string>("")
+  const listenStoppingRef = useRef<boolean>(false)
+  const listenEngineRef = useRef<"sherpa" | "vosk" | "chunked" | null>(null)
+  const listenCleanupRef = useRef<(() => void) | null>(null)
+  const voskRecognizerRef = useRef<any>(null)
 
   useEffect(() => {
     let tooltipHeight = 0
@@ -59,17 +70,38 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       screenStreamRef.current?.getTracks().forEach(t => t.stop())
       if (frameIntervalRef.current) clearInterval(frameIntervalRef.current)
       // Listen cleanup
+      if (listenProcessorRef.current) {
+        try { listenProcessorRef.current.disconnect() } catch {}
+      }
       if (listenRecorderRef.current && listenRecorderRef.current.state !== 'inactive') {
         try { listenRecorderRef.current.stop() } catch {}
       }
       listenSystemStreamRef.current?.getTracks().forEach(t => t.stop())
       listenMicStreamRef.current?.getTracks().forEach(t => t.stop())
-      listenStreamRef.current?.getTracks().forEach(t => t.stop())
       if (listenAudioCtxRef.current && listenAudioCtxRef.current.state !== 'closed') {
         try { listenAudioCtxRef.current.close() } catch {}
       }
       if (listenTimerRef.current) clearInterval(listenTimerRef.current)
+      if (listenCleanupRef.current) listenCleanupRef.current()
     }
+  }, [])
+
+  // Keep refs to latest handlers so IPC listeners never go stale
+  const handleRecordRef = useRef<(() => void) | null>(null)
+  const handleListenRef = useRef<(() => void) | null>(null)
+  const handleChatRef = useRef<(() => void) | null>(null)
+  useEffect(() => { handleRecordRef.current = handleRecordClick })
+  useEffect(() => { handleListenRef.current = handleListenClick })
+  useEffect(() => { handleChatRef.current = onChatToggle })
+
+  // Listen for global shortcut IPC events (registered once, uses refs)
+  useEffect(() => {
+    const api = window.electronAPI as any
+    const cleanups: (() => void)[] = []
+    if (api.onToggleRecord) cleanups.push(api.onToggleRecord(() => handleRecordRef.current?.()))
+    if (api.onToggleListen) cleanups.push(api.onToggleListen(() => handleListenRef.current?.()))
+    if (api.onToggleChat) cleanups.push(api.onToggleChat(() => handleChatRef.current?.()))
+    return () => cleanups.forEach(c => c())
   }, [])
 
   // Helper: convert webm Blob → WAV ArrayBuffer using AudioContext
@@ -159,7 +191,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
   // ── Record (screen frames + mic audio → transcribe → send to vision AI) ──
   const handleRecordClick = async () => {
-    if (isRecording) {
+    if (isRecordingRef.current) {
       // Stop: audio recorder onstop handles everything
       recorderRef.current?.stop()
       return
@@ -250,6 +282,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
         if (audioBlob.size === 0 && frames.length === 0) {
           setRecordStatus(null)
+          isRecordingRef.current = false
           setIsRecording(false)
           return
         }
@@ -266,6 +299,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           }
 
           setRecordStatus('Sending to AI...')
+          isRecordingRef.current = false
           setIsRecording(false)
 
           if (frames.length > 0) {
@@ -276,6 +310,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           setRecordStatus(null)
         } catch (err: any) {
           setRecordStatus(`Error: ${err.message}`)
+          isRecordingRef.current = false
           setIsRecording(false)
           setTimeout(() => setRecordStatus(null), 5000)
         }
@@ -283,6 +318,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
       recorder.onerror = () => {
         setRecordStatus('Recording error')
+        isRecordingRef.current = false
         setIsRecording(false)
         if (frameIntervalRef.current) clearInterval(frameIntervalRef.current)
         screenStream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
@@ -293,6 +329,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
       // 5. Start audio recording
       recorder.start()
+      isRecordingRef.current = true
       setIsRecording(true)
       setRecordStatus('Recording screen + mic...')
 
@@ -317,8 +354,12 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     }
   }
 
-  // ── Listen (system audio + mic → chunked transcription) ──
+  // ── Listen (system audio + mic → streaming STT with fallback chain) ──
   const stopListenStreams = () => {
+    if (listenProcessorRef.current) {
+      try { listenProcessorRef.current.disconnect() } catch {}
+      listenProcessorRef.current = null
+    }
     if (listenRecorderRef.current && listenRecorderRef.current.state !== 'inactive') {
       try { listenRecorderRef.current.stop() } catch {}
     }
@@ -327,8 +368,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     listenSystemStreamRef.current = null
     listenMicStreamRef.current?.getTracks().forEach(t => t.stop())
     listenMicStreamRef.current = null
-    listenStreamRef.current?.getTracks().forEach(t => t.stop())
-    listenStreamRef.current = null
     if (listenAudioCtxRef.current && listenAudioCtxRef.current.state !== 'closed') {
       try { listenAudioCtxRef.current.close() } catch {}
     }
@@ -337,101 +376,327 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       clearInterval(listenTimerRef.current)
       listenTimerRef.current = null
     }
+    if (listenCleanupRef.current) {
+      listenCleanupRef.current()
+      listenCleanupRef.current = null
+    }
+    if (voskRecognizerRef.current) {
+      try { voskRecognizerRef.current.remove() } catch {}
+      voskRecognizerRef.current = null
+    }
+  }
+
+  // Capture system audio + mic, return mixed AudioContext destination
+  const captureAudioStreams = async () => {
+    // Run desktop source enumeration + mic capture in parallel
+    const [sources, micStream] = await Promise.all([
+      (window.electronAPI as any).getDesktopSources(),
+      navigator.mediaDevices.getUserMedia({ audio: true })
+    ])
+    listenMicStreamRef.current = micStream
+
+    const screenSource = sources.find((s: any) => s.id.startsWith('screen:'))
+    if (!screenSource) throw new Error('No screen source found')
+
+    const systemStream = await (navigator.mediaDevices as any).getUserMedia({
+      audio: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: screenSource.id } },
+      video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: screenSource.id } }
+    })
+    systemStream.getVideoTracks().forEach((t: MediaStreamTrack) => t.stop())
+    listenSystemStreamRef.current = systemStream
+
+    const audioCtx = new AudioContext()
+    listenAudioCtxRef.current = audioCtx
+    const dest = audioCtx.createMediaStreamDestination()
+    if (systemStream.getAudioTracks().length > 0) {
+      audioCtx.createMediaStreamSource(systemStream).connect(dest)
+    }
+    audioCtx.createMediaStreamSource(micStream).connect(dest)
+
+    return { audioCtx, dest }
+  }
+
+  // Create a ScriptProcessorNode that extracts float32 PCM at 16kHz
+  const createPcmProcessor = (
+    audioCtx: AudioContext,
+    dest: MediaStreamAudioDestinationNode,
+    onPcmChunk: (float32: Float32Array) => void
+  ) => {
+    const processor = audioCtx.createScriptProcessor(4096, 1, 1)
+    listenProcessorRef.current = processor
+    const mixedSource = audioCtx.createMediaStreamSource(dest.stream)
+    mixedSource.connect(processor)
+    processor.connect(audioCtx.destination) // must be connected to stay alive
+
+    const srcRate = audioCtx.sampleRate
+    const targetRate = 16000
+
+    processor.onaudioprocess = (e: AudioProcessingEvent) => {
+      const input = e.inputBuffer.getChannelData(0)
+      const ratio = srcRate / targetRate
+      const newLen = Math.floor(input.length / ratio)
+      const downsampled = new Float32Array(newLen)
+      for (let i = 0; i < newLen; i++) {
+        downsampled[i] = input[Math.floor(i * ratio)]
+      }
+      onPcmChunk(downsampled)
+    }
+  }
+
+  // Convert Float32Array to base64
+  const float32ToBase64 = (f32: Float32Array): string => {
+    const bytes = new Uint8Array(f32.buffer, f32.byteOffset, f32.byteLength)
+    let binary = ""
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+    return btoa(binary)
+  }
+
+  // ── Strategy A: sherpa-onnx (main process, true streaming) ──
+  // Note: sherpa is pre-initialized in handleListenClick parallel flow
+  const startSherpaListen = async (
+    audioCtx: AudioContext,
+    dest: MediaStreamAudioDestinationNode
+  ): Promise<boolean> => {
+    try {
+
+      // Listen for live-transcript events from main process
+      const cleanup = (window.electronAPI as any).onLiveTranscript((data: { type: string; text: string }) => {
+        if (data.text) {
+          listenTranscriptRef.current = data.text
+          setListenStatus(data.text)
+        }
+      })
+      listenCleanupRef.current = cleanup
+
+      // Feed PCM to main process
+      createPcmProcessor(audioCtx, dest, (float32) => {
+        const base64 = float32ToBase64(float32)
+        window.electronAPI.invoke("stt-feed-audio", base64)
+      })
+
+      listenEngineRef.current = "sherpa"
+      console.log("[Listen] Using sherpa-onnx engine")
+      return true
+    } catch (err: any) {
+      console.log("[Listen] sherpa-onnx failed:", err.message)
+      return false
+    }
+  }
+
+  // ── Strategy B: vosk-browser (WASM in renderer, true streaming) ──
+  const startVoskListen = async (
+    audioCtx: AudioContext,
+    dest: MediaStreamAudioDestinationNode
+  ): Promise<boolean> => {
+    try {
+      const Vosk = await import("vosk-browser")
+
+      // Check & download model files (should already be downloaded at startup)
+      const check: { downloaded: boolean } = await window.electronAPI.invoke("stt-check-vosk")
+      if (!check.downloaded) {
+        const dl: { success: boolean; error?: string } = await window.electronAPI.invoke("stt-download-vosk")
+        if (!dl.success) throw new Error(dl.error || "Download failed")
+      }
+
+      // Get model tar.gz from main process
+      setListenStatus("Loading vosk model...")
+      const tarResult: { success: boolean; data?: string; error?: string } =
+        await window.electronAPI.invoke("stt-get-vosk-targz")
+      if (!tarResult.success || !tarResult.data) throw new Error(tarResult.error || "No tar.gz data")
+
+      // Create blob URL from base64
+      const tarBytes = Uint8Array.from(atob(tarResult.data), c => c.charCodeAt(0))
+      const blob = new Blob([tarBytes], { type: "application/gzip" })
+      const modelUrl = URL.createObjectURL(blob)
+
+      // Create vosk model and recognizer
+      const model = await (Vosk as any).createModel(modelUrl)
+      URL.revokeObjectURL(modelUrl)
+
+      const recognizer = new model.KaldiRecognizer(16000)
+      recognizer.setWords(true)
+      voskRecognizerRef.current = recognizer
+
+      // Listen for partial and final results
+      recognizer.on("result", (message: any) => {
+        const text = message.result?.text
+        if (text && text.trim()) {
+          listenTranscriptRef.current += (listenTranscriptRef.current ? " " : "") + text.trim()
+          setListenStatus(listenTranscriptRef.current)
+        }
+      })
+      recognizer.on("partialresult", (message: any) => {
+        const partial = message.result?.partial
+        if (partial && partial.trim()) {
+          const display = listenTranscriptRef.current
+            ? listenTranscriptRef.current + " " + partial.trim()
+            : partial.trim()
+          setListenStatus(display)
+        }
+      })
+
+      // Feed PCM to vosk recognizer
+      createPcmProcessor(audioCtx, dest, (float32) => {
+        try {
+          // vosk-browser expects AudioBuffer or acceptWaveformFloat
+          recognizer.acceptWaveformFloat(float32, 16000)
+        } catch {}
+      })
+
+      listenEngineRef.current = "vosk"
+      console.log("[Listen] Using vosk-browser engine")
+      return true
+    } catch (err: any) {
+      console.log("[Listen] vosk-browser failed:", err.message)
+      return false
+    }
+  }
+
+  // ── Strategy C: chunked transcription fallback ──
+  const startChunkedListen = (
+    dest: MediaStreamAudioDestinationNode
+  ): boolean => {
+    listenTranscriptRef.current = ""
+    listenStoppingRef.current = false
+
+    const pendingChunks: Blob[] = []
+    let isTranscribing = false
+
+    const transcribePending = async () => {
+      if (pendingChunks.length === 0 || isTranscribing) return
+      isTranscribing = true
+      const batch = pendingChunks.splice(0, pendingChunks.length)
+      const combined = new Blob(batch, { type: batch[0]?.type || 'audio/webm' })
+      try {
+        const text = await transcribeBlob(combined)
+        if (text && text.trim()) {
+          listenTranscriptRef.current += (listenTranscriptRef.current ? " " : "") + text.trim()
+          setListenStatus(listenTranscriptRef.current)
+        }
+      } catch (err) {
+        console.log("[Listen] Chunk transcription failed:", err)
+      }
+      isTranscribing = false
+      if (listenStoppingRef.current) {
+        if (pendingChunks.length > 0) { await transcribePending(); return }
+        const finalText = listenTranscriptRef.current.trim()
+        stopListenStreams()
+        if (finalText) { onVoiceMessage(finalText); setListenStatus("Sent transcript") }
+        else { setListenStatus("No speech detected") }
+        setTimeout(() => setListenStatus(null), 3000)
+        setListenElapsed(0)
+        listenStoppingRef.current = false
+        return
+      }
+      if (pendingChunks.length > 0) transcribePending()
+    }
+
+    const recorder = new MediaRecorder(dest.stream)
+    listenRecorderRef.current = recorder
+    recorder.ondataavailable = (e) => {
+      if (e.data.size === 0) return
+      pendingChunks.push(e.data)
+      transcribePending()
+    }
+    recorder.onerror = () => {
+      setListenStatus('Recording error')
+      setIsListening(false)
+      stopListenStreams()
+      setTimeout(() => setListenStatus(null), 3000)
+    }
+    recorder.start(3000) // 3-second chunks for better recognition
+    listenEngineRef.current = "chunked"
+    console.log("[Listen] Using chunked transcription fallback")
+    return true
   }
 
   const handleListenClick = async () => {
-    if (isListening) {
+    if (isListeningRef.current) {
       // ── Stop ──
+      isListeningRef.current = false
       setIsListening(false)
-      stopListenStreams()
+      const engine = listenEngineRef.current
 
-      const text = listenTranscriptRef.current.trim()
-      listenTranscriptRef.current = ""
-      setListenElapsed(0)
-
-      if (text) {
-        onVoiceMessage(text)
-        setListenStatus(`Sent transcript`)
+      if (engine === "sherpa") {
+        stopListenStreams()
+        try {
+          const result: { success: boolean; text?: string } =
+            await window.electronAPI.invoke("stt-stop-sherpa")
+          const text = (result.text || listenTranscriptRef.current).trim()
+          if (text) { onVoiceMessage(text); setListenStatus("Sent transcript") }
+          else { setListenStatus("No speech detected") }
+        } catch { setListenStatus("Error stopping") }
         setTimeout(() => setListenStatus(null), 3000)
-      } else {
-        setListenStatus("No speech detected")
+        setListenElapsed(0)
+      } else if (engine === "vosk") {
+        // Flush final result from vosk
+        if (voskRecognizerRef.current) {
+          try { voskRecognizerRef.current.retrieveFinalResult() } catch {}
+        }
+        // Small delay for final event to arrive
+        await new Promise(r => setTimeout(r, 200))
+        const text = listenTranscriptRef.current.trim()
+        stopListenStreams()
+        if (text) { onVoiceMessage(text); setListenStatus("Sent transcript") }
+        else { setListenStatus("No speech detected") }
         setTimeout(() => setListenStatus(null), 3000)
+        setListenElapsed(0)
+      } else if (engine === "chunked") {
+        listenStoppingRef.current = true
+        if (listenRecorderRef.current && listenRecorderRef.current.state !== 'inactive') {
+          listenRecorderRef.current.stop()
+        } else {
+          const text = listenTranscriptRef.current.trim()
+          stopListenStreams()
+          if (text) { onVoiceMessage(text); setListenStatus("Sent transcript") }
+          else { setListenStatus("No speech detected") }
+          setTimeout(() => setListenStatus(null), 3000)
+          setListenElapsed(0)
+          listenStoppingRef.current = false
+        }
       }
+      listenEngineRef.current = null
       return
     }
 
     // ── Start ──
     try {
-      // 1. Get a screen source for system audio loopback
-      const sources = await (window.electronAPI as any).getDesktopSources()
-      const screenSource = sources.find((s: any) => s.id.startsWith('screen:'))
-      if (!screenSource) {
-        setListenStatus('No screen source found')
-        setTimeout(() => setListenStatus(null), 3000)
+      setListenStatus("Initializing...")
+      listenTranscriptRef.current = ""
+
+      // Pre-init sherpa in parallel with audio capture for faster startup
+      const [audioResult, sherpaPreInit] = await Promise.all([
+        captureAudioStreams(),
+        window.electronAPI.invoke("stt-init-sherpa").catch(() => ({ success: false }))
+      ])
+      const { audioCtx, dest } = audioResult
+
+      // Try engines in order: sherpa-onnx → vosk-browser → chunked
+      let started = false
+      if (sherpaPreInit.success) {
+        started = await startSherpaListen(audioCtx, dest)
+      }
+      if (!started) {
+        started = await startVoskListen(audioCtx, dest)
+      }
+      if (!started) {
+        started = startChunkedListen(dest)
+      }
+
+      if (!started) {
+        stopListenStreams()
+        setListenStatus("No speech engine available")
+        setTimeout(() => setListenStatus(null), 4000)
         return
       }
 
-      // 2. Capture system audio (must request video too on Windows, discard it immediately)
-      const systemStream = await (navigator.mediaDevices as any).getUserMedia({
-        audio: {
-          mandatory: {
-            chromeMediaSource: 'desktop',
-            chromeMediaSourceId: screenSource.id
-          }
-        },
-        video: {
-          mandatory: {
-            chromeMediaSource: 'desktop',
-            chromeMediaSourceId: screenSource.id
-          }
-        }
-      })
-      // Discard video tracks — we only need audio
-      systemStream.getVideoTracks().forEach((t: MediaStreamTrack) => t.stop())
-      listenSystemStreamRef.current = systemStream
-
-      // 3. Capture mic audio
-      const micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      listenMicStreamRef.current = micStream
-
-      // 4. Mix system + mic audio via AudioContext
-      const audioCtx = new AudioContext()
-      listenAudioCtxRef.current = audioCtx
-      const dest = audioCtx.createMediaStreamDestination()
-      audioCtx.createMediaStreamSource(systemStream).connect(dest)
-      audioCtx.createMediaStreamSource(micStream).connect(dest)
-
-      // 5. Record mixed stream in 10-second chunks
-      listenTranscriptRef.current = ""
-      const recorder = new MediaRecorder(dest.stream)
-      listenRecorderRef.current = recorder
-
-      recorder.ondataavailable = async (e) => {
-        if (e.data.size === 0) return
-        try {
-          const text = await transcribeBlob(e.data)
-          if (text.trim()) {
-            listenTranscriptRef.current += (listenTranscriptRef.current ? " " : "") + text.trim()
-            setListenStatus(listenTranscriptRef.current)
-          }
-        } catch (err) {
-          console.warn("[Listen] Chunk transcription failed:", err)
-        }
-      }
-
-      recorder.onerror = () => {
-        setListenStatus('Recording error')
-        setIsListening(false)
-        stopListenStreams()
-        setTimeout(() => setListenStatus(null), 3000)
-      }
-
-      recorder.start(10000) // 10-second chunks
+      isListeningRef.current = true
       setIsListening(true)
       setListenElapsed(0)
-      setListenStatus("Listening to system audio + mic...")
+      if (listenEngineRef.current !== "chunked") {
+        setListenStatus("Listening...")
+      }
 
-      // Elapsed timer
       listenTimerRef.current = setInterval(() => {
         setListenElapsed(prev => prev + 1)
       }, 1000)
@@ -455,62 +720,63 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     <span className="kbd-key">{children}</span>
   )
 
-  return (
-    <div className="w-fit">
-      <div className="text-xs liquid-glass-bar aura py-1 px-3 flex items-center justify-center gap-2.5 draggable-area">
-
-        {/* Show/Hide */}
-        <div className="flex items-center gap-1.5 group/cmd">
-          <span className="cmd-label text-[11px] leading-none text-[hsla(0, 2%, 10%, 0.00)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
-            Show/Hide
-          </span>
-          <div className="flex gap-0.5">
-            <Kbd>Ctrl</Kbd><Kbd>B</Kbd>
-          </div>
+  const shortcutsBarContent = (
+    <div className="text-xs liquid-glass-bar aura py-0.5 px-2 flex items-center justify-center gap-2 draggable-area w-fit mx-auto">
+      {/* Show/Hide */}
+      <div className="flex items-center gap-1.5 group/cmd">
+        <span className="cmd-label text-[11px] leading-none text-[hsla(0, 2%, 10%, 0.00)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
+          Show/Hide
+        </span>
+        <div className="flex gap-0.5">
+          <Kbd>Ctrl</Kbd><Kbd>B</Kbd>
         </div>
+      </div>
 
-        <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
+      <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
 
-        {/* Stealth Mode */}
-        <div className="flex items-center gap-1.5 group/cmd">
-          <span className="cmd-label text-[11px] leading-none text-[hsl(0,0%,8%)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
-            Stealth
-          </span>
-          <div className="flex gap-0.5">
-            <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>G</Kbd>
-          </div>
+      {/* Stealth Mode */}
+      <div className="flex items-center gap-1.5 group/cmd">
+        <span className="cmd-label text-[11px] leading-none text-[hsl(0,0%,8%)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
+          Stealth
+        </span>
+        <div className="flex gap-0.5">
+          <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>G</Kbd>
         </div>
+      </div>
 
-        <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
+      <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
 
-        {/* Screenshot */}
-        <div className="flex items-center gap-1.5 group/cmd">
-          <span className="cmd-label text-[11px] leading-none text-[hsl(0,0%,8%)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
-            Screenshot
-          </span>
-          <div className="flex gap-0.5">
-            <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>H</Kbd>
-          </div>
+      {/* Screenshot */}
+      <div className="flex items-center gap-1.5 group/cmd">
+        <span className="cmd-label text-[11px] leading-none text-[hsl(0,0%,8%)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
+          Screenshot
+        </span>
+        <div className="flex gap-0.5">
+          <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>H</Kbd>
         </div>
+      </div>
 
-        {/* Solve */}
-        {screenshots.length > 0 && (
-          <>
-            <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
-            <div className="flex items-center gap-1.5 group/cmd animate-fade-in">
-              <span className="cmd-label text-[11px] leading-none text-[hsl(0,0%,8%)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
-                Solve
-              </span>
-              <div className="flex gap-0.5">
-                <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>Enter</Kbd>
-              </div>
+      {/* Solve */}
+      {screenshots.length > 0 && (
+        <>
+          <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
+          <div className="flex items-center gap-1.5 group/cmd animate-fade-in">
+            <span className="cmd-label text-[11px] leading-none text-[hsl(0,0%,8%)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
+              Solve
+            </span>
+            <div className="flex gap-0.5">
+              <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>Enter</Kbd>
             </div>
-          </>
-        )}
+          </div>
+        </>
+      )}
+    </div>
+  )
 
-        <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
-
-        {/* Mic Recording */}
+  const actionBarContent = (
+    <div className="text-xs liquid-glass-bar py-0.5 px-2 flex items-center justify-center gap-2 w-fit mx-auto draggable-area">
+      {/* Record */}
+      <div className="flex items-center gap-1 group/cmd">
         <button
           className={`glass-btn glass-btn-record flex items-center gap-1.5 transition-all duration-300 ${
             isRecording
@@ -519,15 +785,21 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           }`}
           onClick={handleRecordClick}
           type="button"
-          title="Record screen + voice, sends to vision AI on stop"
         >
           <span className={`inline-block w-1.5 h-1.5 rounded-full transition-all duration-300 ${
             isRecording ? 'bg-[hsl(0,72%,60%)] animate-pulse' : 'bg-[hsla(0,72%,60%,0.5)]'
           }`} />
           {isRecording ? 'Stop' : 'Record'}
         </button>
+        <div className="flex gap-0.5">
+          <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>O</Kbd>
+        </div>
+      </div>
 
-        {/* Listen mode */}
+      <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
+
+      {/* Listen */}
+      <div className="flex items-center gap-1 group/cmd">
         <button
           className={`glass-btn flex items-center gap-1.5 transition-all duration-300 ${
             isListening
@@ -536,15 +808,21 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           }`}
           onClick={handleListenClick}
           type="button"
-          title="Listen and show transcript. After press stop, it will be sent to AI"
         >
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3 h-3">
             <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
           </svg>
           {isListening ? 'Stop' : 'Listen'}
         </button>
+        <div className="flex gap-0.5">
+          <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>J</Kbd>
+        </div>
+      </div>
 
-        {/* Chat */}
+      <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
+
+      {/* Chat */}
+      <div className="flex items-center gap-1 group/cmd">
         <button
           className="glass-btn"
           onClick={onChatToggle}
@@ -552,51 +830,66 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         >
           Chat
         </button>
-
-        {/* Theme toggle */}
-        <button
-          className="w-5 h-5 rounded-full bg-white/8 hover:bg-white/15 transition-all duration-200 flex items-center justify-center border border-white/5 hover:border-white/10 interactive"
-          title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-          onClick={toggleTheme}
-          type="button"
-        >
-          {isDark ? (
-            <IoSunnyOutline className="w-3 h-3 bar-icon" />
-          ) : (
-            <IoMoonOutline className="w-3 h-3 bar-icon" />
-          )}
-        </button>
-
-        {/* Help toggle */}
-        <button
-          className="inline-block interactive"
-          onClick={() => setIsTooltipVisible(!isTooltipVisible)}
-          type="button"
-        >
-          <div className={`w-5 h-5 rounded-full transition-all duration-200 flex items-center justify-center cursor-pointer border ${
-            isTooltipVisible
-              ? 'bg-white/15 border-white/15'
-              : 'bg-white/8 hover:bg-white/15 border-white/5 hover:border-white/10'
-          }`}>
-            <span className="text-[10px] bar-icon">?</span>
-          </div>
-        </button>
-
-        <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
-
-        {/* Quit */}
-        <button
-          className="bar-icon transition-all duration-200 hover:scale-110"
-          title="Quit"
-          onClick={() => window.electronAPI.quitApp()}
-        >
-          <IoLogOutOutline className="w-4 h-4" />
-        </button>
+        <div className="flex gap-0.5">
+          <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>C</Kbd>
+        </div>
       </div>
 
-      {/* Shortcuts panel */}
-      {isTooltipVisible && (
-        <div ref={tooltipRef} className="mt-2 w-72 z-50 animate-slide-up">
+      <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
+
+      {/* Theme toggle */}
+      <button
+        className="w-5 h-5 rounded-full bg-white/8 hover:bg-white/15 transition-all duration-200 flex items-center justify-center border border-white/5 hover:border-white/10 interactive"
+        title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+        onClick={toggleTheme}
+        type="button"
+      >
+        {isDark ? (
+          <IoSunnyOutline className="w-3 h-3 bar-icon" />
+        ) : (
+          <IoMoonOutline className="w-3 h-3 bar-icon" />
+        )}
+      </button>
+
+      {/* Help toggle */}
+      <button
+        className="inline-block interactive"
+        onClick={() => setIsTooltipVisible(!isTooltipVisible)}
+        type="button"
+      >
+        <div className={`w-5 h-5 rounded-full transition-all duration-200 flex items-center justify-center cursor-pointer border ${
+          isTooltipVisible
+            ? 'bg-white/15 border-white/15'
+            : 'bg-white/8 hover:bg-white/15 border-white/5 hover:border-white/10'
+        }`}>
+          <span className="text-[10px] bar-icon">?</span>
+        </div>
+      </button>
+
+      {/* Quit */}
+      <button
+        className="bar-icon transition-all duration-200 hover:scale-110"
+        title="Quit"
+        onClick={() => window.electronAPI.quitApp()}
+      >
+        <IoLogOutOutline className="w-4 h-4" />
+      </button>
+    </div>
+  )
+
+  return (
+    <>
+      {/* Action bar → top portal */}
+      {actionBarPortalId && document.getElementById(actionBarPortalId) &&
+        createPortal(actionBarContent, document.getElementById(actionBarPortalId)!)}
+
+      {/* Shortcuts bar → bottom portal */}
+      {shortcutsBarPortalId && document.getElementById(shortcutsBarPortalId) &&
+        createPortal(shortcutsBarContent, document.getElementById(shortcutsBarPortalId)!)}
+
+      {/* Shortcuts help panel (floats above bottom bar) */}
+      {isTooltipVisible && shortcutsBarPortalId && document.getElementById(shortcutsBarPortalId) && createPortal(
+        <div ref={tooltipRef} className="mb-2 w-72 z-50 animate-slide-up mx-auto">
           <div className="p-3.5 text-xs liquid-glass-dark text-[hsl(0,0%,8%)] shadow-2xl">
             <h3 className="font-semibold text-[hsl(0,0%,10%)] mb-3 text-[13px]">Keyboard Shortcuts</h3>
             <div className="space-y-2.5">
@@ -605,10 +898,14 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
                 { label: 'Stealth', keys: ['Ctrl', 'Shift', 'G'], desc: 'Hide from screen share' },
                 { label: 'Screenshot', keys: ['Ctrl', 'Shift', 'H'], desc: 'Capture current screen' },
                 { label: 'Solve', keys: ['Ctrl', 'Shift', 'Enter'], desc: 'Generate solution from screenshots' },
+                { label: 'Record', keys: ['Ctrl', 'Shift', 'O'], desc: 'Record screen + mic' },
+                { label: 'Listen', keys: ['Ctrl', 'Shift', 'J'], desc: 'Listen & transcribe audio' },
+                { label: 'Chat', keys: ['Ctrl', 'Shift', 'C'], desc: 'Toggle chat window' },
                 { label: 'Reset', keys: ['Ctrl', 'Shift', 'R'], desc: 'Clear all screenshots & reset' },
                 { label: 'Copy & Ask AI', keys: ['Ctrl', 'Shift', 'K'], desc: 'Copy page text & send to AI' },
                 { label: 'Center Window', keys: ['Ctrl', 'Shift', 'Space'], desc: 'Center and show window' },
                 { label: 'Move Window', keys: ['Ctrl', 'Shift', 'Arrows'], desc: 'Reposition the window' },
+                { label: 'Resize Window', keys: ['Ctrl', 'Alt', 'Arrows'], desc: 'Grow or shrink the window' },
               ].map(({ label, keys, desc }) => (
                 <div key={label} className="flex items-start justify-between gap-3 group/item">
                   <div>
@@ -624,12 +921,13 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
               ))}
             </div>
           </div>
-        </div>
+        </div>,
+        document.getElementById(shortcutsBarPortalId)!
       )}
 
       {/* Record status panel */}
-      {recordStatus !== null && (
-        <div className="mt-2 liquid-glass-dark p-3 text-[hsl(0,0%,8%)] text-xs max-w-md animate-slide-up">
+      {recordStatus !== null && actionBarPortalId && document.getElementById(actionBarPortalId) && createPortal(
+        <div className="mt-1 liquid-glass-dark p-3 text-[hsl(0,0%,8%)] text-xs max-w-md animate-slide-up mx-auto w-fit">
           <span className="font-semibold text-[hsl(0,0%,15%)]">
             {isRecording ? 'Recording...' : recordStatus.startsWith('Error') ? 'Error' : 'Processing'}
           </span>{' '}
@@ -642,12 +940,13 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
               <span className="text-[10px] text-[hsl(0,0%,30%)]">Click Stop to finish recording</span>
             </div>
           )}
-        </div>
+        </div>,
+        document.getElementById(actionBarPortalId)!
       )}
 
       {/* Listen status panel */}
-      {listenStatus !== null && (
-        <div className="mt-2 liquid-glass-dark p-3 text-[hsl(0,0%,8%)] text-xs max-w-md animate-slide-up">
+      {listenStatus !== null && actionBarPortalId && document.getElementById(actionBarPortalId) && createPortal(
+        <div className="mt-1 liquid-glass-dark p-3 text-[hsl(0,0%,8%)] text-xs max-w-md animate-slide-up mx-auto w-fit">
           <div className="flex items-center gap-2 mb-1.5">
             <span className="font-semibold text-teal-400">
               {isListening ? 'Listening' : listenStatus.startsWith('Error') ? 'Error' : listenStatus.startsWith('Transcript') ? 'Done' : 'Processing'}
@@ -671,9 +970,10 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
               Press Stop to transcribe & send to AI
             </div>
           )}
-        </div>
+        </div>,
+        document.getElementById(actionBarPortalId)!
       )}
-    </div>
+    </>
   )
 }
 

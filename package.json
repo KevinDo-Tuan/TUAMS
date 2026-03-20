@@ -161,8 +161,10 @@
     "remark-math": "^6.0.0",
     "screenshot-desktop": "^1.15.0",
     "sharp": "^0.33.5",
+    "sherpa-onnx-node": "^1.12.29",
     "tailwind-merge": "^2.5.4",
     "tesseract.js": "^5.0.5",
-    "uuid": "^11.0.3"
+    "uuid": "^11.0.3",
+    "vosk-browser": "^0.0.8"
   }
 }

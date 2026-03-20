@@ -45,10 +45,9 @@ export class WindowHelper {
   private appState: AppState
   private stealthMode: boolean = false
 
-  // Initialize with explicit number type and 0 value
   private screenWidth: number = 0
   private screenHeight: number = 0
-  private step: number = 0
+  private step: number = 60
   private currentX: number = 0
   private currentY: number = 0
 
@@ -103,10 +102,10 @@ export class WindowHelper {
 
     
     const windowSettings: Electron.BrowserWindowConstructorOptions = {
-      width: 750,
-      height: 550,
+      width: 640,
+      height: 350,
       minWidth: 300,
-      minHeight: 300,
+      minHeight: 100,
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: true,
@@ -407,78 +406,50 @@ export class WindowHelper {
     }
   }
 
-  // New methods for window movement
+  private syncPosition(): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+    const [x, y] = this.mainWindow.getPosition()
+    this.currentX = x
+    this.currentY = y
+  }
+
   public moveWindowRight(): void {
-    if (!this.mainWindow) return
-
-    const windowWidth = this.windowSize?.width || 0
-    const halfWidth = windowWidth / 2
-
-    // Ensure currentX and currentY are numbers
-    this.currentX = Number(this.currentX) || 0
-    this.currentY = Number(this.currentY) || 0
-
-    this.currentX = Math.min(
-      this.screenWidth - halfWidth,
-      this.currentX + this.step
-    )
-    this.mainWindow.setPosition(
-      Math.round(this.currentX),
-      Math.round(this.currentY)
-    )
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+    this.syncPosition()
+    const [w] = this.mainWindow.getSize()
+    this.currentX = Math.min(this.screenWidth - w / 2, this.currentX + this.step)
+    this.mainWindow.setPosition(Math.round(this.currentX), Math.round(this.currentY))
   }
 
   public moveWindowLeft(): void {
-    if (!this.mainWindow) return
-
-    const windowWidth = this.windowSize?.width || 0
-    const halfWidth = windowWidth / 2
-
-    // Ensure currentX and currentY are numbers
-    this.currentX = Number(this.currentX) || 0
-    this.currentY = Number(this.currentY) || 0
-
-    this.currentX = Math.max(-halfWidth, this.currentX - this.step)
-    this.mainWindow.setPosition(
-      Math.round(this.currentX),
-      Math.round(this.currentY)
-    )
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+    this.syncPosition()
+    const [w] = this.mainWindow.getSize()
+    this.currentX = Math.max(-w / 2, this.currentX - this.step)
+    this.mainWindow.setPosition(Math.round(this.currentX), Math.round(this.currentY))
   }
 
   public moveWindowDown(): void {
-    if (!this.mainWindow) return
-
-    const windowHeight = this.windowSize?.height || 0
-    const halfHeight = windowHeight / 2
-
-    // Ensure currentX and currentY are numbers
-    this.currentX = Number(this.currentX) || 0
-    this.currentY = Number(this.currentY) || 0
-
-    this.currentY = Math.min(
-      this.screenHeight - halfHeight,
-      this.currentY + this.step
-    )
-    this.mainWindow.setPosition(
-      Math.round(this.currentX),
-      Math.round(this.currentY)
-    )
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+    this.syncPosition()
+    const [, h] = this.mainWindow.getSize()
+    this.currentY = Math.min(this.screenHeight - h / 2, this.currentY + this.step)
+    this.mainWindow.setPosition(Math.round(this.currentX), Math.round(this.currentY))
   }
 
   public moveWindowUp(): void {
-    if (!this.mainWindow) return
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+    this.syncPosition()
+    const [, h] = this.mainWindow.getSize()
+    this.currentY = Math.max(-h / 2, this.currentY - this.step)
+    this.mainWindow.setPosition(Math.round(this.currentX), Math.round(this.currentY))
+  }
 
-    const windowHeight = this.windowSize?.height || 0
-    const halfHeight = windowHeight / 2
-
-    // Ensure currentX and currentY are numbers
-    this.currentX = Number(this.currentX) || 0
-    this.currentY = Number(this.currentY) || 0
-
-    this.currentY = Math.max(-halfHeight, this.currentY - this.step)
-    this.mainWindow.setPosition(
-      Math.round(this.currentX),
-      Math.round(this.currentY)
-    )
+  public resizeWindow(dw: number, dh: number): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+    const [w, h] = this.mainWindow.getSize()
+    const newW = Math.max(300, w + dw)
+    const newH = Math.max(100, h + dh)
+    this.mainWindow.setSize(Math.round(newW), Math.round(newH))
   }
 }

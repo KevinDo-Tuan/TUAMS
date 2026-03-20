@@ -80,6 +80,20 @@ export class ShortcutsHelper {
       this.appState.moveWindowUp()
     })
 
+    // Resize window shortcuts
+    register("CommandOrControl+Alt+Right", () => {
+      this.appState.resizeWindow(60, 0)
+    })
+    register("CommandOrControl+Alt+Left", () => {
+      this.appState.resizeWindow(-60, 0)
+    })
+    register("CommandOrControl+Alt+Down", () => {
+      this.appState.resizeWindow(0, 60)
+    })
+    register("CommandOrControl+Alt+Up", () => {
+      this.appState.resizeWindow(0, -60)
+    })
+
     register("CommandOrControl+Shift+K", async () => {
       const mainWindow = this.appState.getMainWindow()
       if (!mainWindow || mainWindow.isDestroyed()) return
@@ -126,6 +140,42 @@ export class ShortcutsHelper {
 
     register("CommandOrControl+Shift+G", () => {
       this.appState.toggleStealthMode()
+    })
+
+    // Record shortcut
+    register("CommandOrControl+Shift+O", () => {
+      const mainWindow = this.appState.getMainWindow()
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (!this.appState.isVisible()) {
+          mainWindow.showInactive()
+          mainWindow.setAlwaysOnTop(true, "screen-saver")
+        }
+        mainWindow.webContents.send("toggle-record")
+      }
+    })
+
+    // Listen shortcut
+    register("CommandOrControl+Shift+J", () => {
+      const mainWindow = this.appState.getMainWindow()
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (!this.appState.isVisible()) {
+          mainWindow.showInactive()
+          mainWindow.setAlwaysOnTop(true, "screen-saver")
+        }
+        mainWindow.webContents.send("toggle-listen")
+      }
+    })
+
+    // Chat shortcut
+    register("CommandOrControl+Shift+C", () => {
+      const mainWindow = this.appState.getMainWindow()
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (!this.appState.isVisible()) {
+          mainWindow.showInactive()
+          mainWindow.setAlwaysOnTop(true, "screen-saver")
+        }
+        mainWindow.webContents.send("toggle-chat")
+      }
     })
 
     register("CommandOrControl+B", () => {

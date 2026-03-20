@@ -45,6 +45,8 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
   const [currentModel, setCurrentModel] = useState<{ provider: string; model: string }>({ provider: "cloud", model: "glm-5:cloud" })
   const [allModels, setAllModels] = useState<string[]>([])
   const [thinkingWord, setThinkingWord] = useState("")
+  const [isModelPickerOpen, setIsModelPickerOpen] = useState(false)
+  const modelPickerRef = useRef<HTMLDivElement>(null)
 
   const barRef = useRef<HTMLDivElement>(null)
 
@@ -242,6 +244,17 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     };
   }, [refetch]);
 
+  // Close model picker on click outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (modelPickerRef.current && !modelPickerRef.current.contains(e.target as Node)) {
+        setIsModelPickerOpen(false)
+      }
+    }
+    if (isModelPickerOpen) document.addEventListener("mousedown", handler)
+    return () => document.removeEventListener("mousedown", handler)
+  }, [isModelPickerOpen])
+
   const handleTooltipVisibilityChange = (visible: boolean, height: number) => {
     setIsTooltipVisible(visible)
     setTooltipHeight(height)
@@ -316,7 +329,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
       className="select-none flex flex-col"
     >
       <div className="bg-transparent w-full h-full flex flex-col">
-        <div className="px-2 py-1.5 flex-1 flex flex-col min-h-0">
+        <div className="px-1.5 py-1 flex-1 flex flex-col min-h-0">
           <Toast
             open={toastOpen}
             onOpenChange={setToastOpen}
@@ -326,27 +339,34 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
             <ToastTitle>{toastMessage.title}</ToastTitle>
             <ToastDescription>{toastMessage.description}</ToastDescription>
           </Toast>
-          <div className="w-fit">
+          {/* Action bar at top (centered) */}
+          <div className="flex justify-center mb-1">
+            <div id="action-bar-top" />
+          </div>
+          {/* QueueCommands (hidden container - renders via portals) */}
+          <div style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden' }}>
             <QueueCommands
               screenshots={screenshots}
               onTooltipVisibilityChange={handleTooltipVisibilityChange}
               onChatToggle={handleChatToggle}
               onVoiceMessage={handleVoiceMessage}
               onScreenRecordingMessage={handleScreenRecordingMessage}
+              actionBarPortalId="action-bar-top"
+              shortcutsBarPortalId="shortcuts-bar-bottom"
             />
           </div>
           {/* Chat Interface */}
           {isChatOpen && (
-            <div className="mt-3 w-full mx-auto liquid-glass chat-container aura-strong p-4 flex flex-col overflow-hidden flex-1 min-h-0">
+            <div className="mt-2 w-full mx-auto liquid-glass chat-container aura-strong p-3 flex flex-col overflow-hidden flex-1 min-h-0">
               <div className="vortex-watermark" />
               {/* Messages Area */}
-              <div className="flex-1 min-h-0 overflow-y-auto mb-3 p-3">
+              <div className="flex-1 min-h-0 overflow-y-auto mb-2 px-2 py-1">
                 {chatMessages.length === 0 ? (
-                  <div className="text-center mt-6 space-y-2 animate-fade-in">
-                    <div className="text-sm text-[hsla(210,25%,15%,0.6)] font-medium tracking-tight">
+                  <div className="text-center mt-4 space-y-1 animate-fade-in">
+                    <div className="text-[13px] text-[hsla(210,25%,15%,0.5)] font-medium tracking-tight">
                       {currentModel.model}
                     </div>
-                    <div className="text-[11px] text-[hsla(210,20%,25%,0.35)]">
+                    <div className="text-[10px] text-[hsla(210,20%,25%,0.3)]">
                        Select model below
                     </div>
                   </div>
@@ -354,28 +374,28 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                   chatMessages.map((msg, idx) => (
                     <div
                       key={idx}
-                      className={`w-full flex ${msg.role === "user" ? "justify-end" : "justify-start"} mb-2.5 animate-fade-in`}
+                      className={`w-full flex ${msg.role === "user" ? "justify-end" : "justify-start"} mb-2 animate-fade-in`}
                     >
-                      <div className={`max-w-[80%] ${msg.role === "user" ? "ml-8" : "mr-8"} flex flex-col items-${msg.role === "user" ? "end" : "start"} gap-1.5`}>
+                      <div className={`max-w-[85%] ${msg.role === "user" ? "ml-6" : "mr-6"} flex flex-col items-${msg.role === "user" ? "end" : "start"} gap-1`}>
                         {msg.role === "user" && msg.attachment && (
-                          <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-white/80 dark:bg-[hsla(215,25%,15%,0.8)] border border-[hsla(0,0%,0%,0.08)] dark:border-[hsla(200,40%,60%,0.15)]">
-                            <div className="w-8 h-8 rounded-lg bg-red-500 flex items-center justify-center flex-shrink-0">
-                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/80 dark:bg-[hsla(215,25%,15%,0.8)] border border-[hsla(0,0%,0%,0.08)] dark:border-[hsla(200,40%,60%,0.15)]">
+                            <div className="w-6 h-6 rounded-md bg-red-500 flex items-center justify-center flex-shrink-0">
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
                               </svg>
                             </div>
                             <div className="min-w-0">
-                              <div className="text-[11.5px] font-medium text-[hsl(0,0%,10%)] dark:text-[hsl(0,0%,90%)] truncate max-w-[200px]">
+                              <div className="text-[11px] font-medium text-[hsl(0,0%,10%)] dark:text-[hsl(0,0%,90%)] truncate max-w-[180px]">
                                 {msg.attachment.fileName || 'File'}
                               </div>
-                              <div className="text-[10px] text-[hsl(0,0%,45%)] dark:text-[hsl(0,0%,55%)]">
+                              <div className="text-[9px] text-[hsl(0,0%,45%)] dark:text-[hsl(0,0%,55%)]">
                                 {msg.attachment.type === 'pdf' ? 'PDF' : msg.attachment.type === 'screenshot' ? 'Screenshot' : 'Recording'}
                               </div>
                             </div>
                           </div>
                         )}
                         <div
-                          className={`px-3.5 py-2.5 text-[12.5px] leading-relaxed ${
+                          className={`px-3 py-2 text-[12px] leading-relaxed ${
                             msg.role === "user"
                               ? "chat-bubble-user"
                               : "chat-bubble-ai"
@@ -390,7 +410,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                 )}
                 {chatLoading && (
                   <div className="flex justify-start mb-2 animate-fade-in">
-                    <div className="chat-bubble-ai px-4 py-3 mr-8">
+                    <div className="chat-bubble-ai px-3 py-2 mr-6">
                       <span className="inline-flex items-center gap-2">
                         <span className="sun-pop">&#9728;</span>
                         <span className="cmd-label text-[11px] text-[hsl(0,0%,8%)] font-medium tracking-wide animate-thinking-word">
@@ -424,10 +444,10 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                     </div>
                   </div>
                 )}
-              <form className="flex gap-2 items-center glass-content" onSubmit={e => { e.preventDefault(); handleChatSend(); }}>
+              <form className="flex gap-1.5 items-center glass-content" onSubmit={e => { e.preventDefault(); handleChatSend(); }}>
                 <input
                   ref={chatInputRef}
-                  className="glass-input flex-1 px-3.5 py-2.5 text-xs"
+                  className="glass-input flex-1 px-3 py-2 text-xs"
                   placeholder={pendingAttachment ? "Add a message or press Enter..." : "Ask anything..."}
                   value={chatInput}
                   onChange={e => setChatInput(e.target.value)}
@@ -439,33 +459,71 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                   }}
                   disabled={chatLoading}
                 />
-                <select
-                  className="glass-input px-1.5 py-2.5 text-[10px] max-w-[100px] text-center truncate appearance-none cursor-pointer"
-                  value={currentModel.model}
-                  onChange={e => handleModelSwitch(e.target.value)}
-                  disabled={chatLoading}
-                >
-                  {allModels.map(m => <option key={m} value={m}>{m.replace(':cloud', ' ☁')}</option>)}
-                </select>
+                {/* Model picker */}
+                <div className="relative" ref={modelPickerRef}>
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-white/6 hover:bg-white/12 border border-white/8 hover:border-white/15 transition-all duration-200 cursor-pointer group"
+                    onClick={() => setIsModelPickerOpen(!isModelPickerOpen)}
+                    disabled={chatLoading}
+                  >
+                    <span className="text-[10px] font-medium tracking-wide text-[hsl(0,0%,25%)] dark:text-[hsl(0,0%,75%)] group-hover:text-[hsl(0,0%,10%)] dark:group-hover:text-white transition-colors">
+                      Model
+                    </span>
+                    <svg className={`w-2.5 h-2.5 text-[hsl(0,0%,40%)] transition-transform duration-200 ${isModelPickerOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                    </svg>
+                  </button>
+                  {isModelPickerOpen && (
+                    <div className="absolute bottom-full right-0 mb-1.5 z-50 animate-fade-in">
+                      <div className="liquid-glass-dark rounded-xl p-1 min-w-[140px] max-h-[200px] overflow-y-auto shadow-xl border border-white/10">
+                        {allModels.map(m => (
+                          <button
+                            key={m}
+                            type="button"
+                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] transition-all duration-150 flex items-center gap-2 ${
+                              currentModel.model === m
+                                ? 'bg-white/15 text-[hsl(0,0%,8%)] dark:text-white font-medium'
+                                : 'text-[hsl(0,0%,30%)] dark:text-[hsl(0,0%,70%)] hover:bg-white/8 hover:text-[hsl(0,0%,10%)] dark:hover:text-white'
+                            }`}
+                            onClick={() => { handleModelSwitch(m); setIsModelPickerOpen(false) }}
+                          >
+                            {m.includes(':cloud') && (
+                              <span className="text-[9px] opacity-60">&#9729;</span>
+                            )}
+                            <span className="truncate">{m.replace(':cloud', '').replace(':', '/')}</span>
+                            {currentModel.model === m && (
+                              <svg className="w-3 h-3 ml-auto flex-shrink-0 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                              </svg>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {/* Attach */}
                 <button
                   type="button"
                   onClick={handleAttachPdf}
-                  className="glass-btn p-2 flex items-center justify-center"
+                  className="w-7 h-7 rounded-lg bg-white/6 hover:bg-white/12 border border-white/8 hover:border-white/15 transition-all duration-200 flex items-center justify-center group"
                   disabled={chatLoading}
                   title="Attach PDF"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className="w-3.5 h-3.5 text-[hsl(0,0%,35%)] group-hover:text-[hsl(0,0%,10%)] dark:text-[hsl(0,0%,65%)] dark:group-hover:text-white transition-colors">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                   </svg>
                 </button>
+                {/* Send */}
                 <button
                   type="submit"
-                  className="dawn-btn group relative p-3 rounded-xl flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="dawn-btn group relative p-2 rounded-lg flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
                   disabled={chatLoading || (!chatInput.trim() && !pendingAttachment)}
                   tabIndex={-1}
                   aria-label="Send"
                 >
-                  <svg className="vortex-send w-5 h-5" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+                  <svg className="vortex-send w-4 h-4" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
                     <g transform="translate(256,256)">
                       <path d="M 0,-180 C 80,-170 160,-100 170,-20 C 180,60 120,130 40,150 C -40,170 -110,120 -130,50 C -150,-20 -100,-80 -40,-90 C 20,-100 60,-60 60,-10 C 60,30 30,50 0,50" fill="none" stroke="currentColor" strokeWidth="32" strokeLinecap="round"/>
                       <path d="M 0,180 C -80,170 -160,100 -170,20 C -180,-60 -120,-130 -40,-150 C 40,-170 110,-120 130,-50 C 150,20 100,80 40,90 C -20,100 -60,60 -60,10 C -60,-30 -30,-50 0,-50" fill="none" stroke="currentColor" strokeWidth="32" strokeLinecap="round"/>
@@ -480,6 +538,10 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
               </div>
             </div>
           )}
+        </div>
+        {/* Bottom shortcuts bar portal target */}
+        <div className="px-2 pb-1 flex flex-col items-center">
+          <div id="shortcuts-bar-bottom" />
         </div>
       </div>
     </div>
