@@ -6,7 +6,7 @@ interface QueueCommandsProps {
   onTooltipVisibilityChange: (visible: boolean, height: number) => void
   screenshots: Array<{ path: string; preview: string }>
   onChatToggle: () => void
-  onVoiceMessage: (text: string) => void
+  onVoiceMessage: (text: string, prompt?: string) => void
   onScreenRecordingMessage: (transcript: string, frames: string[]) => void
   actionBarPortalId?: string
   shortcutsBarPortalId?: string
@@ -53,6 +53,19 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const listenEngineRef = useRef<"sherpa" | "vosk" | "chunked" | null>(null)
   const listenCleanupRef = useRef<(() => void) | null>(null)
   const voskRecognizerRef = useRef<any>(null)
+
+  // Listen prompt suggestions
+  const LISTEN_SUGGESTIONS = [
+    { label: "What should I say?", icon: "✨" },
+    { label: "Follow-up questions", icon: "📋" },
+    { label: "Summarize", icon: "📝" },
+  ]
+  const [customPrompt, setCustomPrompt] = useState("")
+  const listenPromptRef = useRef<string | null>(null)
+
+  const getActivePrompt = (): string | undefined => {
+    return listenPromptRef.current || undefined
+  }
 
   useEffect(() => {
     let tooltipHeight = 0
@@ -104,60 +117,21 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     return () => cleanups.forEach(c => c())
   }, [])
 
-  // Helper: convert webm Blob → WAV ArrayBuffer using AudioContext
-  const webmToWav = async (blob: Blob): Promise<ArrayBuffer> => {
-    const arrayBuffer = await blob.arrayBuffer()
-    const audioCtx = new AudioContext()
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
-    await audioCtx.close()
-
-    // Encode as 16-bit PCM WAV (mono)
-    const numChannels = 1
-    const sampleRate = audioBuffer.sampleRate
-    const samples = audioBuffer.getChannelData(0)
-    const numSamples = samples.length
-    const wavBuffer = new ArrayBuffer(44 + numSamples * 2)
-    const view = new DataView(wavBuffer)
-
-    const writeStr = (offset: number, str: string) => {
-      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i))
-    }
-
-    writeStr(0, "RIFF")
-    view.setUint32(4, 36 + numSamples * 2, true)
-    writeStr(8, "WAVE")
-    writeStr(12, "fmt ")
-    view.setUint32(16, 16, true)
-    view.setUint16(20, 1, true) // PCM
-    view.setUint16(22, numChannels, true)
-    view.setUint32(24, sampleRate, true)
-    view.setUint32(28, sampleRate * numChannels * 2, true)
-    view.setUint16(32, numChannels * 2, true)
-    view.setUint16(34, 16, true) // bits per sample
-    writeStr(36, "data")
-    view.setUint32(40, numSamples * 2, true)
-
-    let offset = 44
-    for (let i = 0; i < numSamples; i++) {
-      const s = Math.max(-1, Math.min(1, samples[i]))
-      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true)
-      offset += 2
-    }
-    return wavBuffer
-  }
-
-  // Helper: ArrayBuffer → base64
+  // Helper: ArrayBuffer → base64 (chunked to avoid call stack limits)
   const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
     const bytes = new Uint8Array(buffer)
-    let binary = ""
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-    return btoa(binary)
+    const CHUNK = 0x8000
+    const parts: string[] = []
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      parts.push(String.fromCharCode(...bytes.subarray(i, i + CHUNK)))
+    }
+    return btoa(parts.join(''))
   }
 
-  // Helper: transcribe audio blob via main process (Whisper → Windows Speech fallback)
+  // Helper: transcribe audio blob via main process (sends webm directly — no conversion)
   const transcribeBlob = async (blob: Blob): Promise<string> => {
-    const wavBuffer = await webmToWav(blob)
-    const base64 = arrayBufferToBase64(wavBuffer)
+    const buffer = await blob.arrayBuffer()
+    const base64 = arrayBufferToBase64(buffer)
     const result: { success: boolean; text?: string; error?: string } =
       await window.electronAPI.invoke("transcribe-audio", base64)
     if (result.success && result.text) {
@@ -581,7 +555,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         if (pendingChunks.length > 0) { await transcribePending(); return }
         const finalText = listenTranscriptRef.current.trim()
         stopListenStreams()
-        if (finalText) { onVoiceMessage(finalText); setListenStatus("Sent transcript") }
+        if (finalText) { onVoiceMessage(finalText, getActivePrompt()); setListenStatus("Sent transcript") }
         else { setListenStatus("No speech detected") }
         setTimeout(() => setListenStatus(null), 3000)
         setListenElapsed(0)
@@ -610,52 +584,58 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     return true
   }
 
-  const handleListenClick = async () => {
-    if (isListeningRef.current) {
-      // ── Stop ──
-      isListeningRef.current = false
-      setIsListening(false)
-      const engine = listenEngineRef.current
+  // Stop listening and send transcript with an optional prompt
+  const stopListenAndSend = async (promptOverride?: string) => {
+    if (!isListeningRef.current) return
+    isListeningRef.current = false
+    setIsListening(false)
+    const engine = listenEngineRef.current
+    const prompt = promptOverride ?? getActivePrompt()
 
-      if (engine === "sherpa") {
-        stopListenStreams()
-        try {
-          const result: { success: boolean; text?: string } =
-            await window.electronAPI.invoke("stt-stop-sherpa")
-          const text = (result.text || listenTranscriptRef.current).trim()
-          if (text) { onVoiceMessage(text); setListenStatus("Sent transcript") }
-          else { setListenStatus("No speech detected") }
-        } catch { setListenStatus("Error stopping") }
-        setTimeout(() => setListenStatus(null), 3000)
-        setListenElapsed(0)
-      } else if (engine === "vosk") {
-        // Flush final result from vosk
-        if (voskRecognizerRef.current) {
-          try { voskRecognizerRef.current.retrieveFinalResult() } catch {}
-        }
-        // Small delay for final event to arrive
-        await new Promise(r => setTimeout(r, 200))
+    if (engine === "sherpa") {
+      stopListenStreams()
+      try {
+        const result: { success: boolean; text?: string } =
+          await window.electronAPI.invoke("stt-stop-sherpa")
+        const text = (result.text || listenTranscriptRef.current).trim()
+        if (text) { onVoiceMessage(text, prompt); setListenStatus("Sent transcript") }
+        else { setListenStatus("No speech detected") }
+      } catch { setListenStatus("Error stopping") }
+      setTimeout(() => setListenStatus(null), 3000)
+      setListenElapsed(0)
+    } else if (engine === "vosk") {
+      if (voskRecognizerRef.current) {
+        try { voskRecognizerRef.current.retrieveFinalResult() } catch {}
+      }
+      await new Promise(r => setTimeout(r, 200))
+      const text = listenTranscriptRef.current.trim()
+      stopListenStreams()
+      if (text) { onVoiceMessage(text, prompt); setListenStatus("Sent transcript") }
+      else { setListenStatus("No speech detected") }
+      setTimeout(() => setListenStatus(null), 3000)
+      setListenElapsed(0)
+    } else if (engine === "chunked") {
+      listenStoppingRef.current = true
+      // Set the prompt ref so the chunked callback picks it up
+      listenPromptRef.current = prompt ?? null
+      if (listenRecorderRef.current && listenRecorderRef.current.state !== 'inactive') {
+        listenRecorderRef.current.stop()
+      } else {
         const text = listenTranscriptRef.current.trim()
         stopListenStreams()
-        if (text) { onVoiceMessage(text); setListenStatus("Sent transcript") }
+        if (text) { onVoiceMessage(text, prompt); setListenStatus("Sent transcript") }
         else { setListenStatus("No speech detected") }
         setTimeout(() => setListenStatus(null), 3000)
         setListenElapsed(0)
-      } else if (engine === "chunked") {
-        listenStoppingRef.current = true
-        if (listenRecorderRef.current && listenRecorderRef.current.state !== 'inactive') {
-          listenRecorderRef.current.stop()
-        } else {
-          const text = listenTranscriptRef.current.trim()
-          stopListenStreams()
-          if (text) { onVoiceMessage(text); setListenStatus("Sent transcript") }
-          else { setListenStatus("No speech detected") }
-          setTimeout(() => setListenStatus(null), 3000)
-          setListenElapsed(0)
-          listenStoppingRef.current = false
-        }
+        listenStoppingRef.current = false
       }
-      listenEngineRef.current = null
+    }
+    listenEngineRef.current = null
+  }
+
+  const handleListenClick = async () => {
+    if (isListeningRef.current) {
+      await stopListenAndSend()
       return
     }
 
@@ -663,6 +643,8 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     try {
       setListenStatus("Initializing...")
       listenTranscriptRef.current = ""
+      listenPromptRef.current = null
+      setCustomPrompt("")
 
       // Pre-init sherpa in parallel with audio capture for faster startup
       const [audioResult, sherpaPreInit] = await Promise.all([
@@ -946,29 +928,57 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
       {/* Listen status panel */}
       {listenStatus !== null && actionBarPortalId && document.getElementById(actionBarPortalId) && createPortal(
-        <div className="mt-1 liquid-glass-dark p-3 text-[hsl(0,0%,8%)] text-xs max-w-md animate-slide-up mx-auto w-fit">
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="font-semibold text-teal-400">
-              {isListening ? 'Listening' : listenStatus.startsWith('Error') ? 'Error' : listenStatus.startsWith('Transcript') ? 'Done' : 'Processing'}
-            </span>
-            {isListening && (
-              <>
-                <span className="text-teal-300/70 font-mono text-[11px]">{formatTime(listenElapsed)}</span>
-                <span className="inline-flex items-center gap-1">
-                  <span className="loading-dot w-1 h-1 rounded-full bg-teal-400 inline-block" />
-                  <span className="loading-dot w-1 h-1 rounded-full bg-teal-400 inline-block" />
-                  <span className="loading-dot w-1 h-1 rounded-full bg-teal-400 inline-block" />
-                </span>
-              </>
-            )}
+        <div className="mt-1 liquid-glass-dark p-3 text-[hsl(0,0%,8%)] text-xs max-w-md animate-slide-up mx-auto w-fit min-w-[320px]">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-teal-400">
+                {isListening ? 'Listening' : listenStatus.startsWith('Error') ? 'Error' : listenStatus.startsWith('Transcript') ? 'Done' : 'Processing'}
+              </span>
+              {isListening && (
+                <>
+                  <span className="text-teal-300/70 font-mono text-[11px]">{formatTime(listenElapsed)}</span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="loading-dot w-1 h-1 rounded-full bg-teal-400 inline-block" />
+                    <span className="loading-dot w-1 h-1 rounded-full bg-teal-400 inline-block" />
+                    <span className="loading-dot w-1 h-1 rounded-full bg-teal-400 inline-block" />
+                  </span>
+                </>
+              )}
+            </div>
           </div>
           <div className={`leading-relaxed ${listenStatus.startsWith('Error') ? 'text-[hsla(0,72%,65%,0.9)]' : 'text-[hsl(0,0%,8%)]/80'}`}>
             {listenStatus}
           </div>
           {isListening && (
-            <div className="mt-2 text-[10px] text-[hsl(0,0%,15%)]/40">
-              Press Stop to transcribe & send to AI
-            </div>
+            <>
+              {/* Suggestion bubbles — clicking sends immediately */}
+              <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                {LISTEN_SUGGESTIONS.map((s) => (
+                  <button
+                    key={s.label}
+                    onClick={() => stopListenAndSend(s.label)}
+                    className="px-2 py-1 rounded-full text-[11px] font-medium bg-white/10 text-[hsl(0,0%,30%)] hover:bg-indigo-500 hover:text-white transition-all cursor-pointer"
+                  >
+                    {s.icon} {s.label}
+                  </button>
+                ))}
+              </div>
+              {/* Custom prompt input — Enter sends immediately */}
+              <div className="mt-2">
+                <input
+                  type="text"
+                  value={customPrompt}
+                  onChange={(e) => setCustomPrompt(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && customPrompt.trim()) {
+                      stopListenAndSend(customPrompt.trim())
+                    }
+                  }}
+                  placeholder="Ask anything about the conversation..."
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-white/10 text-[11px] text-[hsl(0,0%,15%)] placeholder-[hsl(0,0%,15%)]/40 outline-none focus:bg-white/15 transition-colors"
+                />
+              </div>
+            </>
           )}
         </div>,
         document.getElementById(actionBarPortalId)!

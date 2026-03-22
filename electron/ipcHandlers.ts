@@ -301,30 +301,32 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   })
 
-  // Transcribe audio (WAV base64 from renderer)
-  // Fallback chain: Whisper CLI → Windows Speech Recognition
+  // Transcribe audio (webm base64 from renderer — no renderer-side conversion needed)
+  // Fallback chain: Whisper CLI (webm native) → ffmpeg+Windows Speech Recognition
   ipcMain.handle("transcribe-audio", async (_, audioBase64: string) => {
     const tmpDir = os.tmpdir()
-    const wavPath = path.join(tmpDir, `cluely-audio-${Date.now()}.wav`)
+    const ts = Date.now()
+    const webmPath = path.join(tmpDir, `cluely-audio-${ts}.webm`)
+    const wavPath = path.join(tmpDir, `cluely-audio-${ts}.wav`)
 
     try {
       const buffer = Buffer.from(audioBase64, "base64")
-      fs.writeFileSync(wavPath, buffer)
-      console.log(`[Transcribe] Saved ${buffer.length} bytes to ${wavPath}`)
+      fs.writeFileSync(webmPath, buffer)
+      console.log(`[Transcribe] Saved ${buffer.length} bytes to ${webmPath}`)
 
-      // 1) Try Whisper CLI
+      // 1) Try Whisper CLI (supports webm natively — no conversion needed)
       try {
         const whisperText = await new Promise<string>((resolve, reject) => {
           execFile(
             "whisper",
-            [wavPath, "--model", "tiny", "--output_format", "txt", "--output_dir", tmpDir],
+            [webmPath, "--model", "tiny", "--output_format", "txt", "--output_dir", tmpDir],
             { timeout: 60000 },
             (error) => {
               if (error) {
                 reject(error)
                 return
               }
-              const txtPath = wavPath.replace(".wav", ".txt")
+              const txtPath = webmPath.replace(".webm", ".txt")
               if (fs.existsSync(txtPath)) {
                 const text = fs.readFileSync(txtPath, "utf-8").trim()
                 try { fs.unlinkSync(txtPath) } catch {}
@@ -341,9 +343,22 @@ export function initializeIpcHandlers(appState: AppState): void {
         console.log("[Transcribe] Whisper unavailable, trying Windows Speech Recognition...", whisperErr.message)
       }
 
-      // 2) Fallback: Windows built-in Speech Recognition (System.Speech)
+      // 2) Fallback: convert webm→wav via ffmpeg, then Windows Speech Recognition
       if (process.platform === "win32") {
         try {
+          // Convert webm to wav via ffmpeg (required for System.Speech)
+          await new Promise<void>((resolve, reject) => {
+            execFile(
+              "ffmpeg",
+              ["-y", "-i", webmPath, "-ar", "16000", "-ac", "1", "-f", "wav", wavPath],
+              { timeout: 15000 },
+              (error) => {
+                if (error) reject(error)
+                else resolve()
+              }
+            )
+          })
+
           const psScript = `
 Add-Type -AssemblyName System.Speech
 $rec = New-Object System.Speech.Recognition.SpeechRecognitionEngine
@@ -391,6 +406,7 @@ $rec.Dispose()
       console.error("[Transcribe] Failed:", error.message)
       return { success: false, error: error.message }
     } finally {
+      try { fs.unlinkSync(webmPath) } catch {}
       try { fs.unlinkSync(wavPath) } catch {}
     }
   })

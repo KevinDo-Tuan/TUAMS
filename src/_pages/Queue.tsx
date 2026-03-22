@@ -264,13 +264,19 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     setIsChatOpen(!isChatOpen)
   }
 
-  const handleVoiceMessage = async (text: string) => {
+  const handleVoiceMessage = async (text: string, prompt?: string) => {
     // Open chat and send the transcribed voice message to AI
     setIsChatOpen(true)
-    setChatMessages(msgs => [...msgs, { role: "user", text: `[Voice] ${text}` }])
+    const displayText = prompt
+      ? `[Voice] ${prompt}\n\nTranscript: "${text}"`
+      : `[Voice] ${text}`
+    const aiPrompt = prompt
+      ? `${prompt}\n\nHere is the transcript of the conversation:\n"${text}"`
+      : text
+    setChatMessages(msgs => [...msgs, { role: "user", text: displayText }])
     setChatLoading(true)
     try {
-      const response = await window.electronAPI.invoke("ai-chat", text)
+      const response = await window.electronAPI.invoke("ai-chat", aiPrompt)
       setChatMessages(msgs => [...msgs, { role: "ai", text: response }])
     } catch (err) {
       setChatMessages(msgs => [...msgs, { role: "ai", text: "Error: " + String(err) }])
