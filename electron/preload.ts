@@ -52,6 +52,7 @@ interface ElectronAPI {
   openPdfDialog: () => Promise<{ fileName: string; pageCount: number; text: string; images: string[] } | { error: string } | null>
   getWindowBounds: () => Promise<{ x: number; y: number; width: number; height: number } | null>
   setWindowBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<void>
+  onAiStreamToken: (callback: (text: string) => void) => () => void
   invoke: (channel: string, ...args: any[]) => Promise<any>
 }
 
@@ -223,6 +224,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const subscription = (_: any, data: { engine: string; file: string; percent: number }) => callback(data)
     ipcRenderer.on("stt-download-progress", subscription)
     return () => { ipcRenderer.removeListener("stt-download-progress", subscription) }
+  },
+  onAiStreamToken: (callback: (text: string) => void) => {
+    const subscription = (_: any, text: string) => callback(text)
+    ipcRenderer.on("ai-stream-token", subscription)
+    return () => { ipcRenderer.removeListener("ai-stream-token", subscription) }
   },
   moveWindowLeft: () => ipcRenderer.invoke("move-window-left"),
   moveWindowRight: () => ipcRenderer.invoke("move-window-right"),

@@ -11,6 +11,7 @@ import {
   downloadSherpaModel,
   isVoskModelDownloaded,
   downloadVoskModel,
+  preloadVoskModel,
 } from "./StreamingSpeech"
 
 export class AppState {
@@ -334,16 +335,15 @@ async function initializeApp() {
       callback(allowed.includes(permission))
     })
 
-    appState.createWindow()
     appState.createTray()
     // Register global shortcuts using ShortcutsHelper
     appState.shortcutsHelper.registerGlobalShortcuts()
 
-    // Download speech models in background (non-blocking)
+    // Download speech models before showing the window
     ;(async () => {
       try {
         if (!isSherpaModelDownloaded()) {
-          console.log("[App] Downloading sherpa-onnx speech model in background...")
+          console.log("[App] Downloading sherpa-onnx speech model...")
           await downloadSherpaModel((file, pct) => {
             if (pct % 25 === 0) console.log(`[App] sherpa model: ${file} ${pct}%`)
           })
@@ -356,8 +356,10 @@ async function initializeApp() {
       }
       try {
         if (!isVoskModelDownloaded()) {
-          console.log("[App] Downloading vosk speech model in background...")
-          await downloadVoskModel()
+          console.log("[App] Downloading vosk speech model...")
+          await downloadVoskModel((file, pct) => {
+            if (pct % 25 === 0) console.log(`[App] vosk model: ${file} ${pct}%`)
+          })
           console.log("[App] vosk model download complete")
         } else {
           console.log("[App] vosk model already downloaded")
@@ -365,6 +367,29 @@ async function initializeApp() {
       } catch (err) {
         console.warn("[App] vosk model download failed:", err)
       }
+
+      // Pre-build vosk tar.gz cache so Listen mode starts instantly
+      await preloadVoskModel()
+
+      // Clean up old vosk model files
+      try {
+        const oldVoskDir = path.join(app.getPath("userData"), "models", "vosk-model-small-en-us-0.15")
+        const oldVoskTarGz = path.join(app.getPath("userData"), "models", "vosk-model-small-en-us-0.15.tar.gz")
+        const fs = await import("fs")
+        if (fs.existsSync(oldVoskDir)) {
+          fs.rmSync(oldVoskDir, { recursive: true })
+          console.log("[App] Deleted old vosk model directory")
+        }
+        if (fs.existsSync(oldVoskTarGz)) {
+          fs.unlinkSync(oldVoskTarGz)
+          console.log("[App] Deleted old vosk tar.gz cache")
+        }
+      } catch (err) {
+        console.warn("[App] Failed to clean up old vosk model:", err)
+      }
+
+      console.log("[App] All downloads complete, creating window...")
+      appState.createWindow()
     })()
   })
 

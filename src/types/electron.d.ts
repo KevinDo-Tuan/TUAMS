@@ -43,6 +43,7 @@ interface ElectronAPI {
   chatWithVision: (message: string, images: string[]) => Promise<string>
   openPdfDialog: () => Promise<{ fileName: string; pageCount: number; text: string; images: string[] } | { error: string } | null>
 
+  onAiStreamToken: (callback: (text: string) => void) => () => void
   invoke: (channel: string, ...args: any[]) => Promise<any>
 }
 

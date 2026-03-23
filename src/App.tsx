@@ -59,6 +59,7 @@ declare global {
       getWindowBounds: () => Promise<{ x: number; y: number; width: number; height: number } | null>
       setWindowBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<void>
       onStealthModeChanged: (callback: (enabled: boolean) => void) => () => void
+      onAiStreamToken: (callback: (text: string) => void) => () => void
       invoke: (channel: string, ...args: any[]) => Promise<any>
     }
   }

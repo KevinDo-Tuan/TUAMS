@@ -607,7 +607,7 @@ button, input, select, textarea, .interactive {
   border-radius: 0.625rem;
   padding: 4px 10px;
   color: hsl(0, 0%, 8%);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   transition: all 0.3s var(--transition-cosmic);
   cursor: pointer;
@@ -1158,4 +1158,62 @@ button, input, select, textarea, .interactive {
 }
 .dark .btn-primary:hover {
   box-shadow: 0 6px 20px hsla(200, 85%, 55%, 0.35);
+}
+
+/* ── Listen panel (enhanced) ── */
+.listen-panel {
+  border-radius: 0.875rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+.dark .listen-panel {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Ping animation for live indicator */
+@keyframes ping {
+  75%, 100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+.animate-ping {
+  animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+/* Tabular nums for timer */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Listen suggestion button hover glow */
+.listen-suggestion-btn:hover {
+  box-shadow: 0 0 12px hsla(240, 60%, 55%, 0.2);
+}
+
+/* ── Mode indicator pills ── */
+.mode-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.mode-pill-listen {
+  background: hsla(175, 60%, 45%, 0.15);
+  color: hsl(175, 60%, 45%);
+  border: 1px solid hsla(175, 60%, 45%, 0.25);
+}
+.mode-pill-record {
+  background: hsla(0, 72%, 55%, 0.15);
+  color: hsl(0, 72%, 55%);
+  border: 1px solid hsla(0, 72%, 55%, 0.25);
+}
+.mode-pill-chat {
+  background: hsla(220, 70%, 55%, 0.15);
+  color: hsl(220, 70%, 55%);
+  border: 1px solid hsla(220, 70%, 55%, 0.25);
 }

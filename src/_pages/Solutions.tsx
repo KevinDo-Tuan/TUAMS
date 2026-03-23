@@ -29,17 +29,17 @@ export const ContentSection = ({
   isLoading: boolean
 }) => (
   <div className="space-y-2.5 animate-fade-in">
-    <h2 className="text-[13px] font-semibold text-red-200/90 tracking-wide uppercase text-[11px]">
+    <h2 className="text-[13px] font-semibold text-red-200/90 tracking-wide uppercase">
       {title}
     </h2>
     {isLoading ? (
       <div className="mt-4 flex">
-        <p className="text-xs bg-gradient-to-r from-red-300/80 via-white to-red-300/80 bg-[length:200%_100%] bg-clip-text text-transparent animate-text-gradient-wave">
+        <p className="text-sm bg-gradient-to-r from-red-300/80 via-white to-red-300/80 bg-[length:200%_100%] bg-clip-text text-transparent animate-text-gradient-wave">
           Extracting problem statement...
         </p>
       </div>
     ) : (
-      <div className="text-[13px] leading-relaxed text-gray-200/90 max-w-[600px]">
+      <div className="text-[14px] leading-relaxed text-gray-200/90 max-w-[600px]">
         {content}
       </div>
     )}
@@ -55,13 +55,13 @@ const SolutionSection = ({
   isLoading: boolean
 }) => (
   <div className="space-y-2.5 animate-fade-in">
-    <h2 className="text-[13px] font-semibold text-red-200/90 tracking-wide uppercase text-[11px]">
+    <h2 className="text-[13px] font-semibold text-red-200/90 tracking-wide uppercase">
       {title}
     </h2>
     {isLoading ? (
       <div className="space-y-1.5">
         <div className="mt-4 flex">
-          <p className="text-xs bg-gradient-to-r from-red-300/80 via-white to-red-300/80 bg-[length:200%_100%] bg-clip-text text-transparent animate-text-gradient-wave">
+          <p className="text-sm bg-gradient-to-r from-red-300/80 via-white to-red-300/80 bg-[length:200%_100%] bg-clip-text text-transparent animate-text-gradient-wave">
             Loading solutions...
           </p>
         </div>
@@ -100,22 +100,22 @@ export const ComplexitySection = ({
   isLoading: boolean
 }) => (
   <div className="space-y-2.5 animate-fade-in">
-    <h2 className="text-[13px] font-semibold text-red-200/90 tracking-wide uppercase text-[11px]">
+    <h2 className="text-[13px] font-semibold text-red-200/90 tracking-wide uppercase">
       Complexity (Updated)
     </h2>
     {isLoading ? (
-      <p className="text-xs bg-gradient-to-r from-red-300/80 via-white to-red-300/80 bg-[length:200%_100%] bg-clip-text text-transparent animate-text-gradient-wave">
+      <p className="text-sm bg-gradient-to-r from-red-300/80 via-white to-red-300/80 bg-[length:200%_100%] bg-clip-text text-transparent animate-text-gradient-wave">
         Calculating complexity...
       </p>
     ) : (
       <div className="space-y-2">
-        <div className="flex items-center gap-2.5 text-[13px] leading-relaxed text-gray-200/90">
+        <div className="flex items-center gap-2.5 text-[14px] leading-relaxed text-gray-200/90">
           <div className="complexity-badge">
             <div className="w-1.5 h-1.5 rounded-full bg-red-400" />
             <strong>Time:</strong> {timeComplexity}
           </div>
         </div>
-        <div className="flex items-center gap-2.5 text-[13px] leading-relaxed text-gray-200/90">
+        <div className="flex items-center gap-2.5 text-[14px] leading-relaxed text-gray-200/90">
           <div className="complexity-badge">
             <div className="w-1.5 h-1.5 rounded-full bg-red-400" />
             <strong>Space:</strong> {spaceComplexity}
@@ -273,7 +273,7 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
             const reader = new FileReader()
             reader.onloadend = async () => {
               const base64Data = (reader.result as string).split(',')[1]
-              // Send audio to Gemini for analysis
+              // Send audio for analysis
               try {
                 const result = await window.electronAPI.analyzeAudioFromBase64(
                   base64Data,
@@ -505,7 +505,7 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
                     {/* Loading state */}
                     {problemStatementData && !solutionData && (
                       <div className="mt-4 flex">
-                        <p className="text-xs bg-gradient-to-r from-red-300/80 via-white to-red-300/80 bg-[length:200%_100%] bg-clip-text text-transparent animate-text-gradient-wave">
+                        <p className="text-sm bg-gradient-to-r from-red-300/80 via-white to-red-300/80 bg-[length:200%_100%] bg-clip-text text-transparent animate-text-gradient-wave">
                           {problemStatementData?.output_format?.subtype === "voice"
                             ? "Processing voice input..."
                             : "Generating solutions..."}

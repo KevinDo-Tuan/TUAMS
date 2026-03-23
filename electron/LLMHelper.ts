@@ -40,7 +40,7 @@ export class LLMHelper {
     { model: "qwen/qwen3-vl-32b-instruct", provider: "openrouter" },
   ]
 
-  constructor(_apiKey?: string, _useOllama: boolean = true, ollamaModel?: string, ollamaUrl?: string) {
+  constructor(ollamaModel?: string, ollamaUrl?: string) {
     this.ollamaUrl = ollamaUrl || "http://localhost:11434"
     this.ollamaModel = ollamaModel || "mixtral:8x7b"
     // Default to cloud model, fall back to local if cloud unavailable
@@ -289,17 +289,86 @@ export class LLMHelper {
     }
   }
 
-  public async chatWithGemini(message: string): Promise<string> {
+  public async chat(message: string): Promise<string> {
     try {
       return this.callOllama(message)
     } catch (error) {
-      console.error("[LLMHelper] Error in chatWithGemini:", error)
+      console.error("[LLMHelper] Error in chat:", error)
       throw error
     }
   }
 
-  public async chat(message: string): Promise<string> {
-    return this.chatWithGemini(message)
+  public async chatStream(message: string, onToken: (accumulated: string) => void): Promise<string> {
+    const preferred = this.useCloud ? this.cloudModel : this.ollamaModel
+    const chain = [preferred, ...LLMHelper.TEXT_FALLBACK_CHAIN.filter(m => m !== preferred)]
+    const errors: string[] = []
+
+    for (const model of chain) {
+      try {
+        console.log(`[LLMHelper] Trying stream model: ${model}`)
+        const result = await this.callOllamaStream(this.ollamaUrl, model, message, onToken)
+        this.activeModel = model
+        return result
+      } catch (err) {
+        console.warn(`[LLMHelper] Stream ${model} failed: ${err.message}`)
+        errors.push(`${model}: ${err.message}`)
+      }
+    }
+    throw new Error(`All stream models failed:\n${errors.join('\n')}`)
+  }
+
+  private async callOllamaStream(url: string, model: string, prompt: string, onToken: (accumulated: string) => void): Promise<string> {
+    const isCloud = OLLAMA_CLOUD_MODELS.includes(model)
+    const timeoutMs = isCloud ? 90_000 : 60_000
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+    try {
+      const response = await fetch(`${url}/api/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          prompt,
+          stream: true,
+          options: { temperature: 0.7, top_p: 0.9 },
+        }),
+        signal: controller.signal,
+      })
+      if (!response.ok) {
+        throw new Error(`Ollama API error: ${response.status} ${response.statusText}`)
+      }
+
+      let accumulated = ""
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error("No response body reader")
+      const decoder = new TextDecoder()
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const chunk = decoder.decode(value, { stream: true })
+        // Ollama streams NDJSON — one JSON object per line
+        for (const line of chunk.split('\n')) {
+          if (!line.trim()) continue
+          try {
+            const parsed = JSON.parse(line)
+            if (parsed.response) {
+              accumulated += parsed.response
+              onToken(accumulated)
+            }
+          } catch {}
+        }
+      }
+      return accumulated
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error(`Ollama stream timed out after ${timeoutMs / 1000}s (model: ${model})`)
+      }
+      throw error
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   public async chatWithVision(message: string, images: string[]): Promise<string> {
@@ -354,7 +423,7 @@ export class LLMHelper {
   }
 
   // model: an Ollama cloud model name like "glm-5:cloud"
-  public async switchToGemini(model?: string): Promise<void> {
+  public async switchToCloud(model?: string): Promise<void> {
     this.useCloud = true
     if (model) this.cloudModel = model
     this.activeModel = this.cloudModel

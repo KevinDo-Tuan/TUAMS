@@ -7,21 +7,21 @@ import * as http from "http"
 import { app, BrowserWindow } from "electron"
 
 // ── Model config ──
-const SHERPA_MODEL_DIR = "sherpa-onnx-streaming-zipformer-en-20M-2023-02-17"
+const SHERPA_MODEL_DIR = "sherpa-onnx-streaming-zipformer-en-2023-06-26"
 const SHERPA_MODEL_FILES: Record<string, string> = {
-  "encoder-epoch-99-avg-1.int8.onnx":
-    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
-  "decoder-epoch-99-avg-1.int8.onnx":
-    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
-  "joiner-epoch-99-avg-1.int8.onnx":
-    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+  "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx":
+    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+  "decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx":
+    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+  "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx":
+    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
   "tokens.txt":
-    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/tokens.txt",
+    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/tokens.txt",
 }
 
-const VOSK_MODEL_DIR = "vosk-model-small-en-us-0.15"
+const VOSK_MODEL_DIR = "vosk-model-en-us-0.22-lgraph"
 const VOSK_MODEL_ZIP_URL =
-  "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+  "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip"
 
 // ── Download helper ──
 function downloadFile(
@@ -267,6 +267,18 @@ export async function getVoskModelTarGz(): Promise<Buffer> {
   return gzipped
 }
 
+// Pre-build and cache the vosk tar.gz so it's instant when Listen is pressed
+export async function preloadVoskModel(): Promise<void> {
+  if (!isVoskModelDownloaded()) return
+  try {
+    console.log("[VoskModel] Preloading tar.gz cache...")
+    await getVoskModelTarGz()
+    console.log("[VoskModel] Preload complete")
+  } catch (err: any) {
+    console.warn("[VoskModel] Preload failed:", err.message)
+  }
+}
+
 // ── Sherpa-onnx streaming recognizer ──
 export class SherpaEngine {
   private recognizer: any = null
@@ -286,9 +298,9 @@ export class SherpaEngine {
         featConfig: { sampleRate: 16000, featureDim: 80 },
         modelConfig: {
           transducer: {
-            encoder: path.join(modelDir, "encoder-epoch-99-avg-1.int8.onnx"),
-            decoder: path.join(modelDir, "decoder-epoch-99-avg-1.int8.onnx"),
-            joiner: path.join(modelDir, "joiner-epoch-99-avg-1.int8.onnx"),
+            encoder: path.join(modelDir, "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx"),
+            decoder: path.join(modelDir, "decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx"),
+            joiner: path.join(modelDir, "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx"),
           },
           tokens: path.join(modelDir, "tokens.txt"),
           numThreads: 2,

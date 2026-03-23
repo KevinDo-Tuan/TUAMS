@@ -42,6 +42,13 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
   const chatEndRef = useRef<HTMLDivElement>(null)
   const [pendingAttachment, setPendingAttachment] = useState<{ transcript: string; frames: string[]; type?: 'recording' | 'screenshot' | 'pdf'; fileName?: string } | null>(null)
 
+  const [isListening, setIsListening] = useState(false)
+  const originalBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
+
+  // Help mode state
+  const [isHelpMode, setIsHelpMode] = useState(false)
+  const preHelpStateRef = useRef<{ isChatOpen: boolean; bounds: { x: number; y: number; width: number; height: number } | null }>({ isChatOpen: false, bounds: null })
+
   const [currentModel, setCurrentModel] = useState<{ provider: string; model: string }>({ provider: "cloud", model: "glm-5:cloud" })
   const [allModels, setAllModels] = useState<string[]>([])
   const [thinkingWord, setThinkingWord] = useState("")
@@ -49,6 +56,47 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
   const modelPickerRef = useRef<HTMLDivElement>(null)
 
   const barRef = useRef<HTMLDivElement>(null)
+
+  // Session memory — accumulates transcript + AI responses across the meeting
+  const sessionMemoryRef = useRef<string[]>([])
+  const autoScreenshotsRef = useRef<string[]>([]) // auto-captured screenshots (record mode)
+
+  const addToSessionMemory = (entry: string) => {
+    sessionMemoryRef.current.push(entry)
+    // Keep last 20 entries to avoid token overflow
+    if (sessionMemoryRef.current.length > 20) {
+      sessionMemoryRef.current = sessionMemoryRef.current.slice(-20)
+    }
+  }
+
+  const getSessionContext = (): string => {
+    if (sessionMemoryRef.current.length === 0) return ""
+    return sessionMemoryRef.current.join("\n---\n")
+  }
+
+  // Resize window when both listen and chat are active
+  useEffect(() => {
+    const bothActive = isListening && isChatOpen
+    if (bothActive) {
+      // Save original bounds and double height
+      window.electronAPI.getWindowBounds().then(bounds => {
+        if (bounds && !originalBoundsRef.current) {
+          originalBoundsRef.current = bounds
+          window.electronAPI.setWindowBounds({
+            x: bounds.x,
+            y: Math.max(0, bounds.y - bounds.height),
+            width: bounds.width,
+            height: bounds.height * 2,
+          })
+        }
+      })
+    } else if (originalBoundsRef.current) {
+      // Restore original bounds
+      const ob = originalBoundsRef.current
+      originalBoundsRef.current = null
+      window.electronAPI.setWindowBounds(ob)
+    }
+  }, [isListening, isChatOpen])
 
   const { data: screenshots = [], refetch } = useQuery<Array<{ path: string; preview: string }>, Error>(
     ["screenshots"],
@@ -115,23 +163,29 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
 
     try {
       let response: string
+      const sessionCtx = getSessionContext()
+      const contextPrefix = sessionCtx ? `[Session context]\n${sessionCtx}\n\n[Current message]\n` : ""
+
       if (attachment) {
         let prompt: string
         if (attachment.type === 'pdf') {
           const textContext = attachment.transcript ? attachment.transcript.slice(0, 8000) : ''
           prompt = userText
-            ? `${userText}\n\nThe user attached a PDF "${attachment.fileName}". Extracted text:\n"${textContext}"\n\nThe attached images are rendered pages from the PDF.`
-            : `The user attached a PDF "${attachment.fileName}". Extracted text:\n"${textContext}"\n\nThe attached images are rendered pages. Analyze the content and provide a helpful response.`
+            ? `${contextPrefix}${userText}\n\nThe user attached a PDF "${attachment.fileName}". Extracted text:\n"${textContext}"\n\nThe attached images are rendered pages from the PDF.`
+            : `${contextPrefix}The user attached a PDF "${attachment.fileName}". Extracted text:\n"${textContext}"\n\nThe attached images are rendered pages. Analyze the content and provide a helpful response.`
         } else {
           prompt = userText
-            ? `${userText}\n\nAudio transcript from recording:\n"${attachment.transcript}"\n\nThe attached images are frames captured from the screen during recording.`
-            : `The user recorded their screen while speaking. Audio transcript:\n"${attachment.transcript}"\n\nThe attached images are frames from the screen recording. Analyze what is shown and provide a helpful response.`
+            ? `${contextPrefix}${userText}\n\nAudio transcript from recording:\n"${attachment.transcript}"\n\nThe attached images are frames captured from the screen during recording.`
+            : `${contextPrefix}The user recorded their screen while speaking. Audio transcript:\n"${attachment.transcript}"\n\nThe attached images are frames from the screen recording. Analyze what is shown and provide a helpful response.`
         }
-        response = await (window.electronAPI as any).chatWithVision(prompt, attachment.frames)
+        // Include auto-captured screenshots as additional context
+        const allFrames = [...attachment.frames, ...autoScreenshotsRef.current.slice(-3)]
+        response = await (window.electronAPI as any).chatWithVision(prompt, allFrames)
       } else {
-        response = await window.electronAPI.invoke("ai-chat", userText)
+        response = await window.electronAPI.invoke("ai-chat", contextPrefix + userText)
       }
       setChatMessages((msgs) => [...msgs, { role: "ai", text: response }])
+      addToSessionMemory(`User: ${userText}\nAI: ${response.slice(0, 300)}`)
     } catch (err) {
       setChatMessages((msgs) => [...msgs, { role: "ai", text: "Error: " + String(err) }])
     } finally {
@@ -178,8 +232,11 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
         setChatMessages(msgs => [...msgs, { role: "user", text }])
         setChatLoading(true)
         try {
-          const response = await window.electronAPI.invoke("ai-chat", text)
+          const sessionCtx = getSessionContext()
+          const prompt = sessionCtx ? `[Session context]\n${sessionCtx}\n\n[Current message]\n${text}` : text
+          const response = await window.electronAPI.invoke("ai-chat", prompt)
           setChatMessages(msgs => [...msgs, { role: "ai", text: response }])
+          addToSessionMemory(`User: ${text.slice(0, 200)}\nAI: ${response.slice(0, 300)}`)
         } catch (err) {
           setChatMessages(msgs => [...msgs, { role: "ai", text: "Error: " + String(err) }])
         } finally {
@@ -264,20 +321,56 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     setIsChatOpen(!isChatOpen)
   }
 
+  const handleHelpToggle = async (active: boolean) => {
+    if (active) {
+      // Save current state
+      const bounds = await window.electronAPI.getWindowBounds()
+      preHelpStateRef.current = { isChatOpen, bounds }
+      // Close chat
+      setIsChatOpen(false)
+      setIsHelpMode(true)
+      // Resize window to compact size for shortcuts
+      if (bounds) {
+        window.electronAPI.setWindowBounds({
+          x: bounds.x,
+          y: bounds.y,
+          width: Math.max(bounds.width, 400),
+          height: 420,
+        })
+      }
+    } else {
+      // Restore previous state
+      setIsHelpMode(false)
+      const saved = preHelpStateRef.current
+      if (saved.isChatOpen) setIsChatOpen(true)
+      if (saved.bounds) {
+        window.electronAPI.setWindowBounds(saved.bounds)
+      }
+      preHelpStateRef.current = { isChatOpen: false, bounds: null }
+    }
+  }
+
   const handleVoiceMessage = async (text: string, prompt?: string) => {
     // Open chat and send the transcribed voice message to AI
     setIsChatOpen(true)
     const displayText = prompt
       ? `[Voice] ${prompt}\n\nTranscript: "${text}"`
       : `[Voice] ${text}`
+    const sessionCtx = getSessionContext()
+    const contextPrefix = sessionCtx ? `[Session context]\n${sessionCtx}\n\n` : ""
     const aiPrompt = prompt
-      ? `${prompt}\n\nHere is the transcript of the conversation:\n"${text}"`
-      : text
+      ? `${contextPrefix}${prompt}\n\nHere is the transcript of the conversation:\n"${text}"`
+      : `${contextPrefix}${text}`
+
+    // Add transcript to session memory
+    addToSessionMemory(`[Transcript] ${text.slice(0, 500)}`)
+
     setChatMessages(msgs => [...msgs, { role: "user", text: displayText }])
     setChatLoading(true)
     try {
       const response = await window.electronAPI.invoke("ai-chat", aiPrompt)
       setChatMessages(msgs => [...msgs, { role: "ai", text: response }])
+      addToSessionMemory(`AI response: ${response.slice(0, 300)}`)
     } catch (err) {
       setChatMessages(msgs => [...msgs, { role: "ai", text: "Error: " + String(err) }])
     } finally {
@@ -359,21 +452,71 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
               onScreenRecordingMessage={handleScreenRecordingMessage}
               actionBarPortalId="action-bar-top"
               shortcutsBarPortalId="shortcuts-bar-bottom"
+              meetingContext={getSessionContext()}
+              onAutoScreenshot={(base64) => {
+                autoScreenshotsRef.current.push(base64)
+                // Keep only last 5 auto-screenshots
+                if (autoScreenshotsRef.current.length > 5) {
+                  autoScreenshotsRef.current = autoScreenshotsRef.current.slice(-5)
+                }
+              }}
+              onLiveAiUpdate={(suggestion) => {
+                addToSessionMemory(`[Live AI] ${suggestion.slice(0, 200)}`)
+              }}
+              onListenStateChange={(listening) => {
+                setIsListening(listening)
+              }}
+              onHelpToggle={handleHelpToggle}
+              isHelpMode={isHelpMode}
             />
           </div>
+          {/* Help Mode — Keyboard Shortcuts Panel */}
+          {isHelpMode && (
+            <div className="mt-2 w-full mx-auto liquid-glass chat-container aura-strong p-0 flex flex-col overflow-hidden flex-1 min-h-0 animate-fade-in">
+              <div className="vortex-watermark" />
+              <div className="flex-1 overflow-y-auto px-4 py-3">
+                <h3 className="font-semibold text-[hsl(0,0%,10%)] dark:text-[hsl(0,0%,90%)] mb-3 text-[14px]">Keyboard Shortcuts</h3>
+                <div className="space-y-2.5">
+                  {[
+                    { label: 'Toggle Window', keys: ['Ctrl', 'B'], desc: 'Show or hide this window' },
+                    { label: 'Stealth', keys: ['Ctrl', 'Shift', 'G'], desc: 'Hide from screen share' },
+                    { label: 'Screenshot', keys: ['Ctrl', 'Shift', 'H'], desc: 'Capture current screen' },
+                    { label: 'Solve', keys: ['Ctrl', 'Shift', 'Enter'], desc: 'Generate solution from screenshots' },
+                    { label: 'Record', keys: ['Ctrl', 'Shift', 'O'], desc: 'Record screen + mic' },
+                    { label: 'Listen', keys: ['Ctrl', 'Shift', 'J'], desc: 'Listen & transcribe audio' },
+                    { label: 'Chat', keys: ['Ctrl', 'Shift', 'C'], desc: 'Toggle chat window' },
+                    { label: 'Reset', keys: ['Ctrl', 'Shift', 'R'], desc: 'Clear all screenshots & reset' },
+                    { label: 'Copy & Ask AI', keys: ['Ctrl', 'Shift', 'K'], desc: 'Copy page text & send to AI' },
+                    { label: 'Center Window', keys: ['Ctrl', 'Shift', 'Space'], desc: 'Center and show window' },
+                    { label: 'Move Window', keys: ['Ctrl', 'Shift', 'Arrows'], desc: 'Reposition the window' },
+                    { label: 'Resize Window', keys: ['Ctrl', 'Alt', 'Arrows'], desc: 'Grow or shrink the window' },
+                  ].map(({ label, keys, desc }) => (
+                    <div key={label} className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="font-medium text-[12px] text-[hsl(0,0%,10%)] dark:text-[hsl(0,0%,90%)]">{label}</div>
+                        <div className="text-[10px] text-[hsl(0,0%,40%)] dark:text-[hsl(0,0%,60%)] mt-0.5">{desc}</div>
+                      </div>
+                      <div className="flex gap-1 flex-shrink-0 mt-0.5">
+                        {keys.map((k) => (
+                          <span key={k} className="kbd-key">{k}</span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
           {/* Chat Interface */}
-          {isChatOpen && (
-            <div className="mt-2 w-full mx-auto liquid-glass chat-container aura-strong p-3 flex flex-col overflow-hidden flex-1 min-h-0">
+          {isChatOpen && !isHelpMode && (
+            <div className="mt-2 w-full mx-auto liquid-glass chat-container aura-strong p-0 flex flex-col overflow-hidden flex-1 min-h-0">
               <div className="vortex-watermark" />
               {/* Messages Area */}
-              <div className="flex-1 min-h-0 overflow-y-auto mb-2 px-2 py-1">
+              <div className="flex-1 min-h-0 overflow-y-auto mb-2 px-3 py-2">
                 {chatMessages.length === 0 ? (
-                  <div className="text-center mt-4 space-y-1 animate-fade-in">
-                    <div className="text-[13px] text-[hsla(210,25%,15%,0.5)] font-medium tracking-tight">
-                      {currentModel.model}
-                    </div>
-                    <div className="text-[10px] text-[hsla(210,20%,25%,0.3)]">
-                       Select model below
+                  <div className="flex items-center justify-center h-full animate-fade-in">
+                    <div className="text-[14px] text-[hsla(210,25%,15%,0.45)] dark:text-[hsla(0,0%,80%,0.45)] font-medium">
+                      Ask your personal assistant
                     </div>
                   </div>
                 ) : (
@@ -401,7 +544,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                           </div>
                         )}
                         <div
-                          className={`px-3 py-2 text-[12px] leading-relaxed ${
+                          className={`px-3.5 py-2.5 text-[14px] leading-relaxed ${
                             msg.role === "user"
                               ? "chat-bubble-user"
                               : "chat-bubble-ai"
@@ -416,10 +559,14 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                 )}
                 {chatLoading && (
                   <div className="flex justify-start mb-2 animate-fade-in">
-                    <div className="chat-bubble-ai px-3 py-2 mr-6">
-                      <span className="inline-flex items-center gap-2">
-                        <span className="sun-pop">&#9728;</span>
-                        <span className="cmd-label text-[11px] text-[hsl(0,0%,8%)] font-medium tracking-wide animate-thinking-word">
+                    <div className="chat-bubble-ai px-3.5 py-2.5 mr-6">
+                      <span className="inline-flex items-center gap-2.5">
+                        <span className="inline-flex items-center gap-1">
+                          <span className="loading-dot w-1.5 h-1.5 rounded-full bg-indigo-400 inline-block" />
+                          <span className="loading-dot w-1.5 h-1.5 rounded-full bg-indigo-400 inline-block" />
+                          <span className="loading-dot w-1.5 h-1.5 rounded-full bg-indigo-400 inline-block" />
+                        </span>
+                        <span className="text-[12px] text-[hsl(0,0%,35%)] dark:text-[hsl(0,0%,65%)] font-medium tracking-wide animate-thinking-word">
                           {thinkingWord}...
                         </span>
                       </span>
@@ -429,7 +576,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                 <div ref={chatEndRef} />
               </div>
               {/* Input Area */}
-              <div className="relative">
+              <div className="relative px-3 pb-3">
                 {/* Attachment preview floating above input */}
                 {pendingAttachment && (
                   <div className="absolute bottom-full right-0 mb-1 z-10 animate-fade-in">
@@ -453,7 +600,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
               <form className="flex gap-1.5 items-center glass-content" onSubmit={e => { e.preventDefault(); handleChatSend(); }}>
                 <input
                   ref={chatInputRef}
-                  className="glass-input flex-1 px-3 py-2 text-xs"
+                  className="glass-input flex-1 px-3 py-2.5 text-[13px]"
                   placeholder={pendingAttachment ? "Add a message or press Enter..." : "Ask anything..."}
                   value={chatInput}
                   onChange={e => setChatInput(e.target.value)}

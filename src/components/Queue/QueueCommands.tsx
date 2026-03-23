@@ -10,6 +10,12 @@ interface QueueCommandsProps {
   onScreenRecordingMessage: (transcript: string, frames: string[]) => void
   actionBarPortalId?: string
   shortcutsBarPortalId?: string
+  meetingContext?: string
+  onAutoScreenshot?: (base64: string) => void
+  onLiveAiUpdate?: (suggestion: string) => void
+  onListenStateChange?: (listening: boolean) => void
+  onHelpToggle?: (active: boolean) => void
+  isHelpMode?: boolean
 }
 
 const QueueCommands: React.FC<QueueCommandsProps> = ({
@@ -19,7 +25,13 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   onVoiceMessage,
   onScreenRecordingMessage,
   actionBarPortalId,
-  shortcutsBarPortalId
+  shortcutsBarPortalId,
+  meetingContext,
+  onAutoScreenshot,
+  onLiveAiUpdate,
+  onListenStateChange,
+  onHelpToggle,
+  isHelpMode,
 }) => {
   const [isTooltipVisible, setIsTooltipVisible] = useState(false)
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'))
@@ -54,18 +66,31 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const listenCleanupRef = useRef<(() => void) | null>(null)
   const voskRecognizerRef = useRef<any>(null)
 
+  // Keep meetingContext in a ref so the live AI interval always reads the latest value
+  const meetingContextRef = useRef(meetingContext)
+  useEffect(() => { meetingContextRef.current = meetingContext })
+
+  // Live AI suggestion state (streams during listen mode)
+  const [liveAiSuggestion, setLiveAiSuggestion] = useState<string | null>(null)
+  const [liveAiLoading, setLiveAiLoading] = useState(false)
+  const liveAiIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastSentTranscriptRef = useRef<string>("")
+  const liveAiAbortRef = useRef<boolean>(false)
+  const liveAiInFlightRef = useRef<boolean>(false)
+  const liveAiStreamCleanupRef = useRef<(() => void) | null>(null)
+
+  // Auto-screenshot state (record mode only)
+  const autoScreenshotIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
   // Listen prompt suggestions
   const LISTEN_SUGGESTIONS = [
-    { label: "What should I say?", icon: "✨" },
-    { label: "Follow-up questions", icon: "📋" },
-    { label: "Summarize", icon: "📝" },
+    { label: "What should I say?", icon: "" },
+    { label: "Follow-up questions", icon: "" },
+    { label: "Summarize", icon: "" },
   ]
   const [customPrompt, setCustomPrompt] = useState("")
   const listenPromptRef = useRef<string | null>(null)
 
-  const getActivePrompt = (): string | undefined => {
-    return listenPromptRef.current || undefined
-  }
 
   useEffect(() => {
     let tooltipHeight = 0
@@ -96,6 +121,11 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       }
       if (listenTimerRef.current) clearInterval(listenTimerRef.current)
       if (listenCleanupRef.current) listenCleanupRef.current()
+      // Live AI + auto-screenshot cleanup
+      if (liveAiIntervalRef.current) clearInterval(liveAiIntervalRef.current)
+      liveAiAbortRef.current = true
+      if (liveAiStreamCleanupRef.current) liveAiStreamCleanupRef.current()
+      if (autoScreenshotIntervalRef.current) clearInterval(autoScreenshotIntervalRef.current)
     }
   }, [])
 
@@ -233,6 +263,11 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           clearInterval(frameIntervalRef.current)
           frameIntervalRef.current = null
         }
+        // Stop auto-screenshot interval
+        if (autoScreenshotIntervalRef.current) {
+          clearInterval(autoScreenshotIntervalRef.current)
+          autoScreenshotIntervalRef.current = null
+        }
 
         // Capture one last frame
         if (screenVideoRef.current) {
@@ -321,6 +356,18 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           if (frame) framesCapturedRef.current.push(frame)
         }
       }, 1000)
+
+      // Auto-screenshot every 15s for visual context (record mode only)
+      autoScreenshotIntervalRef.current = setInterval(async () => {
+        try {
+          const result = await window.electronAPI.invoke("auto-capture-screen")
+          if (result?.success && result.base64 && onAutoScreenshot) {
+            onAutoScreenshot(result.base64)
+          }
+        } catch (err) {
+          console.error("[AutoScreenshot] Error:", err)
+        }
+      }, 15000)
     } catch (err: any) {
       console.error('Screen recording error:', err)
       setRecordStatus(`Error: ${err.message}`)
@@ -553,10 +600,8 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       isTranscribing = false
       if (listenStoppingRef.current) {
         if (pendingChunks.length > 0) { await transcribePending(); return }
-        const finalText = listenTranscriptRef.current.trim()
         stopListenStreams()
-        if (finalText) { onVoiceMessage(finalText, getActivePrompt()); setListenStatus("Sent transcript") }
-        else { setListenStatus("No speech detected") }
+        setListenStatus("Stopped")
         setTimeout(() => setListenStatus(null), 3000)
         setListenElapsed(0)
         listenStoppingRef.current = false
@@ -585,21 +630,33 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   }
 
   // Stop listening and send transcript with an optional prompt
-  const stopListenAndSend = async (promptOverride?: string) => {
+  const stopListenAndSend = async () => {
     if (!isListeningRef.current) return
     isListeningRef.current = false
     setIsListening(false)
+    onListenStateChange?.(false)
+
+    // Clean up live AI interval + stream listener
+    liveAiAbortRef.current = true
+    if (liveAiIntervalRef.current) {
+      clearInterval(liveAiIntervalRef.current)
+      liveAiIntervalRef.current = null
+    }
+    if (liveAiStreamCleanupRef.current) {
+      liveAiStreamCleanupRef.current()
+      liveAiStreamCleanupRef.current = null
+    }
+    setLiveAiSuggestion(null)
+    setLiveAiLoading(false)
+    lastSentTranscriptRef.current = ""
+
     const engine = listenEngineRef.current
-    const prompt = promptOverride ?? getActivePrompt()
 
     if (engine === "sherpa") {
       stopListenStreams()
       try {
-        const result: { success: boolean; text?: string } =
-          await window.electronAPI.invoke("stt-stop-sherpa")
-        const text = (result.text || listenTranscriptRef.current).trim()
-        if (text) { onVoiceMessage(text, prompt); setListenStatus("Sent transcript") }
-        else { setListenStatus("No speech detected") }
+        await window.electronAPI.invoke("stt-stop-sherpa")
+        setListenStatus("Stopped")
       } catch { setListenStatus("Error stopping") }
       setTimeout(() => setListenStatus(null), 3000)
       setListenElapsed(0)
@@ -608,23 +665,17 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         try { voskRecognizerRef.current.retrieveFinalResult() } catch {}
       }
       await new Promise(r => setTimeout(r, 200))
-      const text = listenTranscriptRef.current.trim()
       stopListenStreams()
-      if (text) { onVoiceMessage(text, prompt); setListenStatus("Sent transcript") }
-      else { setListenStatus("No speech detected") }
+      setListenStatus("Stopped")
       setTimeout(() => setListenStatus(null), 3000)
       setListenElapsed(0)
     } else if (engine === "chunked") {
       listenStoppingRef.current = true
-      // Set the prompt ref so the chunked callback picks it up
-      listenPromptRef.current = prompt ?? null
       if (listenRecorderRef.current && listenRecorderRef.current.state !== 'inactive') {
         listenRecorderRef.current.stop()
       } else {
-        const text = listenTranscriptRef.current.trim()
         stopListenStreams()
-        if (text) { onVoiceMessage(text, prompt); setListenStatus("Sent transcript") }
-        else { setListenStatus("No speech detected") }
+        setListenStatus("Stopped")
         setTimeout(() => setListenStatus(null), 3000)
         setListenElapsed(0)
         listenStoppingRef.current = false
@@ -674,6 +725,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
       isListeningRef.current = true
       setIsListening(true)
+      onListenStateChange?.(true)
       setListenElapsed(0)
       if (listenEngineRef.current !== "chunked") {
         setListenStatus("Listening...")
@@ -682,6 +734,51 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       listenTimerRef.current = setInterval(() => {
         setListenElapsed(prev => prev + 1)
       }, 1000)
+
+      // Start live AI suggestions (every 2s) with streaming
+      lastSentTranscriptRef.current = ""
+      liveAiAbortRef.current = false
+      setLiveAiSuggestion(null)
+      liveAiInFlightRef.current = false
+
+      // Listen for streaming tokens from main process
+      const cleanupStreamListener = window.electronAPI.onAiStreamToken((text: string) => {
+        if (!liveAiAbortRef.current) {
+          setLiveAiSuggestion(text)
+        }
+      })
+      liveAiStreamCleanupRef.current = cleanupStreamListener
+
+      liveAiIntervalRef.current = setInterval(async () => {
+        const transcript = listenTranscriptRef.current.trim()
+        if (!transcript || transcript.length < 20) return
+        if (transcript === lastSentTranscriptRef.current) return
+        if (liveAiAbortRef.current) return
+        if (liveAiInFlightRef.current) return
+
+        lastSentTranscriptRef.current = transcript
+        liveAiInFlightRef.current = true
+        setLiveAiLoading(true)
+
+        try {
+          const context = meetingContextRef.current || ""
+          const recentTranscript = transcript.length > 500 ? transcript.slice(-500) : transcript
+          const prompt = `Real-time meeting copilot. Brief actionable coaching (2-3 sentences, no markdown).${context ? `\nContext: ${context.slice(-300)}` : ""}\nTranscript: "${recentTranscript}"`
+
+          console.log("[LiveAI] Sending to ai-chat-stream, transcript length:", recentTranscript.length)
+          const response = await window.electronAPI.invoke("ai-chat-stream", prompt)
+          console.log("[LiveAI] Stream complete, response length:", response?.length)
+          if (!liveAiAbortRef.current) {
+            setLiveAiSuggestion(response)
+            onLiveAiUpdate?.(response)
+          }
+        } catch (err) {
+          console.error("[LiveAI] Stream error:", err)
+        } finally {
+          liveAiInFlightRef.current = false
+          if (!liveAiAbortRef.current) setLiveAiLoading(false)
+        }
+      }, 2000)
 
     } catch (err: any) {
       console.error("Listen error:", err)
@@ -773,9 +870,11 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           }`} />
           {isRecording ? 'Stop' : 'Record'}
         </button>
-        <div className="flex gap-0.5">
-          <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>O</Kbd>
-        </div>
+        {!isRecording && (
+          <div className="flex gap-0.5">
+            <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>O</Kbd>
+          </div>
+        )}
       </div>
 
       <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
@@ -796,9 +895,11 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           </svg>
           {isListening ? 'Stop' : 'Listen'}
         </button>
-        <div className="flex gap-0.5">
-          <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>J</Kbd>
-        </div>
+        {!isListening && (
+          <div className="flex gap-0.5">
+            <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>J</Kbd>
+          </div>
+        )}
       </div>
 
       <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
@@ -806,10 +907,13 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       {/* Chat */}
       <div className="flex items-center gap-1 group/cmd">
         <button
-          className="glass-btn"
+          className="glass-btn flex items-center gap-1.5"
           onClick={onChatToggle}
           type="button"
         >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3 h-3">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+          </svg>
           Chat
         </button>
         <div className="flex gap-0.5">
@@ -836,11 +940,18 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       {/* Help toggle */}
       <button
         className="inline-block interactive"
-        onClick={() => setIsTooltipVisible(!isTooltipVisible)}
+        onClick={() => {
+          const newState = !isHelpMode
+          if (newState && isListeningRef.current) {
+            stopListenAndSend()
+          }
+          setIsTooltipVisible(newState)
+          onHelpToggle?.(newState)
+        }}
         type="button"
       >
         <div className={`w-5 h-5 rounded-full transition-all duration-200 flex items-center justify-center cursor-pointer border ${
-          isTooltipVisible
+          isHelpMode
             ? 'bg-white/15 border-white/15'
             : 'bg-white/8 hover:bg-white/15 border-white/5 hover:border-white/10'
         }`}>
@@ -865,12 +976,12 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       {actionBarPortalId && document.getElementById(actionBarPortalId) &&
         createPortal(actionBarContent, document.getElementById(actionBarPortalId)!)}
 
-      {/* Shortcuts bar → bottom portal */}
-      {shortcutsBarPortalId && document.getElementById(shortcutsBarPortalId) &&
+      {/* Shortcuts bar → bottom portal (hidden in help mode) */}
+      {!isHelpMode && shortcutsBarPortalId && document.getElementById(shortcutsBarPortalId) &&
         createPortal(shortcutsBarContent, document.getElementById(shortcutsBarPortalId)!)}
 
-      {/* Shortcuts help panel (floats above bottom bar) */}
-      {isTooltipVisible && shortcutsBarPortalId && document.getElementById(shortcutsBarPortalId) && createPortal(
+      {/* Shortcuts help panel — only as floating overlay when NOT in help mode */}
+      {isTooltipVisible && !isHelpMode && shortcutsBarPortalId && document.getElementById(shortcutsBarPortalId) && createPortal(
         <div ref={tooltipRef} className="mb-2 w-72 z-50 animate-slide-up mx-auto">
           <div className="p-3.5 text-xs liquid-glass-dark text-[hsl(0,0%,8%)] shadow-2xl">
             <h3 className="font-semibold text-[hsl(0,0%,10%)] mb-3 text-[13px]">Keyboard Shortcuts</h3>
@@ -907,78 +1018,132 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         document.getElementById(shortcutsBarPortalId)!
       )}
 
-      {/* Record status panel */}
+      {/* Record status panel — improved */}
       {recordStatus !== null && actionBarPortalId && document.getElementById(actionBarPortalId) && createPortal(
-        <div className="mt-1 liquid-glass-dark p-3 text-[hsl(0,0%,8%)] text-xs max-w-md animate-slide-up mx-auto w-fit">
-          <span className="font-semibold text-[hsl(0,0%,15%)]">
-            {isRecording ? 'Recording...' : recordStatus.startsWith('Error') ? 'Error' : 'Processing'}
-          </span>{' '}
-          <span className={recordStatus.startsWith('Error') ? 'text-[hsla(0,72%,65%,0.9)]' : 'text-[hsl(0,0%,8%)]/80'}>
-            {recordStatus}
-          </span>
-          {isRecording && (
-            <div className="mt-1.5 flex items-center gap-1.5">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-[hsl(0,72%,60%)] animate-pulse" />
-              <span className="text-[10px] text-[hsl(0,0%,30%)]">Click Stop to finish recording</span>
+        <div className="mt-1 listen-panel liquid-glass-dark p-0 text-[hsl(0,0%,8%)] text-xs animate-slide-up mx-auto w-fit min-w-[280px] overflow-hidden">
+          <div className="flex items-center justify-between px-3.5 py-2.5">
+            <div className="flex items-center gap-2.5">
+              {isRecording && (
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+                </span>
+              )}
+              <span className="font-semibold text-[13px] text-red-500">
+                {isRecording ? 'Recording' : recordStatus.startsWith('Error') ? 'Error' : 'Processing'}
+              </span>
             </div>
-          )}
+            {isRecording && (
+              <button
+                onClick={() => recorderRef.current?.stop()}
+                className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-red-500/15 text-red-500 hover:bg-red-500/25 transition-all"
+              >
+                Stop
+              </button>
+            )}
+          </div>
+          <div className="px-3.5 pb-2.5">
+            <div className={`text-[12px] leading-relaxed ${recordStatus.startsWith('Error') ? 'text-red-500' : 'text-[hsl(0,0%,30%)] dark:text-[hsl(0,0%,70%)]'}`}>
+              {recordStatus}
+            </div>
+            {isRecording && (
+              <div className="mt-1.5 text-[10px] text-[hsl(0,0%,40%)] dark:text-[hsl(0,0%,55%)]">
+                Auto-capturing screen every 15s for context
+              </div>
+            )}
+          </div>
         </div>,
         document.getElementById(actionBarPortalId)!
       )}
 
-      {/* Listen status panel */}
+      {/* Listen status panel — redesigned with live AI suggestions */}
       {listenStatus !== null && actionBarPortalId && document.getElementById(actionBarPortalId) && createPortal(
-        <div className="mt-1 liquid-glass-dark p-3 text-[hsl(0,0%,8%)] text-xs max-w-md animate-slide-up mx-auto w-fit min-w-[320px]">
-          <div className="flex items-center justify-between mb-1.5">
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-teal-400">
+        <div className="mt-1 listen-panel liquid-glass-dark p-0 text-[hsl(0,0%,8%)] text-xs animate-slide-up mx-auto w-fit min-w-[360px] max-w-lg overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between px-3.5 py-2 border-b border-white/8">
+            <div className="flex items-center gap-2.5">
+              {isListening && (
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-teal-500" />
+                </span>
+              )}
+              <span className="font-semibold text-[13px] text-teal-500 dark:text-teal-400">
                 {isListening ? 'Listening' : listenStatus.startsWith('Error') ? 'Error' : listenStatus.startsWith('Transcript') ? 'Done' : 'Processing'}
               </span>
               {isListening && (
-                <>
-                  <span className="text-teal-300/70 font-mono text-[11px]">{formatTime(listenElapsed)}</span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="loading-dot w-1 h-1 rounded-full bg-teal-400 inline-block" />
-                    <span className="loading-dot w-1 h-1 rounded-full bg-teal-400 inline-block" />
-                    <span className="loading-dot w-1 h-1 rounded-full bg-teal-400 inline-block" />
-                  </span>
-                </>
+                <span className="text-teal-400/60 font-mono text-[12px] tabular-nums">{formatTime(listenElapsed)}</span>
               )}
             </div>
+            {isListening && (
+              <button
+                onClick={() => stopListenAndSend()}
+                className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-red-500/15 text-red-500 hover:bg-red-500/25 transition-all"
+              >
+                Stop
+              </button>
+            )}
           </div>
-          <div className={`leading-relaxed ${listenStatus.startsWith('Error') ? 'text-[hsla(0,72%,65%,0.9)]' : 'text-[hsl(0,0%,8%)]/80'}`}>
-            {listenStatus}
+
+          {/* Transcript area */}
+          <div className="px-3.5 py-2.5">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-[hsl(0,0%,40%)] dark:text-[hsl(0,0%,60%)] mb-1">Transcript</div>
+            <div className={`text-[13px] leading-relaxed max-h-[80px] overflow-y-auto ${listenStatus.startsWith('Error') ? 'text-red-500' : 'text-[hsl(0,0%,15%)] dark:text-[hsl(0,0%,85%)]'}`}>
+              {listenStatus || "Waiting for speech..."}
+            </div>
           </div>
+
+          {/* Live AI Suggestion */}
+          {isListening && (liveAiSuggestion || liveAiLoading) && (
+            <div className="px-3.5 py-2.5 border-t border-white/8 bg-indigo-500/[0.04] dark:bg-indigo-400/[0.06]">
+              <div className="flex items-center gap-1.5 mb-1">
+                <svg className="w-3 h-3 text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                </svg>
+                <span className="text-[10px] font-semibold text-indigo-500 dark:text-indigo-400 uppercase tracking-wider">AI Suggestion</span>
+                {liveAiLoading && (
+                  <span className="inline-flex items-center gap-0.5 ml-1">
+                    <span className="loading-dot w-1 h-1 rounded-full bg-indigo-400 inline-block" />
+                    <span className="loading-dot w-1 h-1 rounded-full bg-indigo-400 inline-block" />
+                    <span className="loading-dot w-1 h-1 rounded-full bg-indigo-400 inline-block" />
+                  </span>
+                )}
+              </div>
+              {liveAiSuggestion && (
+                <div className="text-[13px] leading-relaxed text-[hsl(0,0%,12%)] dark:text-[hsl(0,0%,88%)] max-h-[80px] overflow-y-auto">
+                  {liveAiSuggestion}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Quick actions */}
           {isListening && (
-            <>
-              {/* Suggestion bubbles — clicking sends immediately */}
-              <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+            <div className="px-3.5 py-2.5 border-t border-white/8">
+              <div className="flex items-center gap-1.5 flex-wrap mb-2">
                 {LISTEN_SUGGESTIONS.map((s) => (
                   <button
                     key={s.label}
-                    onClick={() => stopListenAndSend(s.label)}
-                    className="px-2 py-1 rounded-full text-[11px] font-medium bg-white/10 text-[hsl(0,0%,30%)] hover:bg-indigo-500 hover:text-white transition-all cursor-pointer"
+                    onClick={() => stopListenAndSend()}
+                    className="listen-suggestion-btn px-2.5 py-1 rounded-full text-[11px] font-medium bg-white/8 dark:bg-white/6 text-[hsl(0,0%,30%)] dark:text-[hsl(0,0%,70%)] hover:bg-indigo-500 hover:text-white transition-all cursor-pointer border border-white/10 hover:border-indigo-500"
                   >
                     {s.icon} {s.label}
                   </button>
                 ))}
               </div>
-              {/* Custom prompt input — Enter sends immediately */}
-              <div className="mt-2">
-                <input
-                  type="text"
-                  value={customPrompt}
-                  onChange={(e) => setCustomPrompt(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && customPrompt.trim()) {
-                      stopListenAndSend(customPrompt.trim())
-                    }
-                  }}
-                  placeholder="Ask anything about the conversation..."
-                  className="w-full px-2.5 py-1.5 rounded-lg bg-white/10 text-[11px] text-[hsl(0,0%,15%)] placeholder-[hsl(0,0%,15%)]/40 outline-none focus:bg-white/15 transition-colors"
-                />
-              </div>
-            </>
+              <input
+                type="text"
+                value={customPrompt}
+                onChange={(e) => setCustomPrompt(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && customPrompt.trim()) {
+                    stopListenAndSend()
+                  }
+                }}
+                placeholder="Ask anything about the conversation..."
+                className="w-full px-3 py-2 rounded-lg bg-white/8 dark:bg-white/6 text-[12px] text-[hsl(0,0%,15%)] dark:text-[hsl(0,0%,85%)] placeholder-[hsl(0,0%,40%)] dark:placeholder-[hsl(0,0%,55%)] outline-none focus:bg-white/15 dark:focus:bg-white/10 transition-colors border border-white/8 focus:border-indigo-400/30"
+              />
+            </div>
           )}
         </div>,
         document.getElementById(actionBarPortalId)!

@@ -132,13 +132,28 @@ export function initializeIpcHandlers(appState: AppState): void {
 
   ipcMain.handle("ai-chat", async (event, message: string) => {
     try {
-      const result = await appState.processingHelper.getLLMHelper().chatWithGemini(message);
+      const result = await appState.processingHelper.getLLMHelper().chat(message);
       return result;
     } catch (error: any) {
       console.error("Error in ai-chat handler:", error);
       throw error;
     }
   });
+
+  ipcMain.handle("ai-chat-stream", async (event, message: string) => {
+    try {
+      const mainWindow = appState.getMainWindow()
+      const result = await appState.processingHelper.getLLMHelper().chatStream(message, (accumulated) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("ai-stream-token", accumulated)
+        }
+      })
+      return result
+    } catch (error: any) {
+      console.error("Error in ai-chat-stream handler:", error)
+      throw error
+    }
+  })
 
   ipcMain.handle("ai-chat-vision", async (event, message: string, images: string[]) => {
     try {
@@ -264,7 +279,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   ipcMain.handle("switch-to-cloud", async (_, model?: string) => {
     try {
       const llmHelper = appState.processingHelper.getLLMHelper();
-      await llmHelper.switchToGemini(model);
+      await llmHelper.switchToCloud(model);
       return { success: true };
     } catch (error: any) {
       console.error("Error switching to cloud model:", error);
@@ -282,6 +297,22 @@ export function initializeIpcHandlers(appState: AppState): void {
       return { success: false, error: error.message };
     }
   });
+
+  // Lightweight screen capture for auto-context (no window hiding, no queue)
+  ipcMain.handle("auto-capture-screen", async () => {
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ["screen"],
+        thumbnailSize: { width: 1280, height: 720 }
+      })
+      if (sources.length === 0) return { success: false, error: "No screen source" }
+      const base64 = sources[0].thumbnail.toJPEG(60).toString("base64")
+      return { success: true, base64 }
+    } catch (error: any) {
+      console.error("Error auto-capturing screen:", error)
+      return { success: false, error: error.message }
+    }
+  })
 
   // Desktop sources for system audio capture
   ipcMain.handle("get-desktop-sources", async () => {
