@@ -27,6 +27,7 @@ interface ElectronAPI {
   onFocusChat: (callback: () => void) => () => void
   onClipboardChat: (callback: (text: string) => void) => () => void
   onStealthModeChanged: (callback: (enabled: boolean) => void) => () => void
+  onSendTranscriptToChat: (callback: () => void) => () => void
   onDebugError: (callback: (error: string) => void) => () => void
   takeScreenshot: () => Promise<void>
   moveWindowLeft: () => Promise<void>
@@ -199,6 +200,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const subscription = (_: any, enabled: boolean) => callback(enabled)
     ipcRenderer.on("stealth-mode-changed", subscription)
     return () => { ipcRenderer.removeListener("stealth-mode-changed", subscription) }
+  },
+  onSendTranscriptToChat: (callback: () => void) => {
+    const subscription = () => callback()
+    ipcRenderer.on("send-transcript-to-chat", subscription)
+    return () => { ipcRenderer.removeListener("send-transcript-to-chat", subscription) }
   },
   onToggleRecord: (callback: () => void) => {
     const subscription = () => callback()

@@ -8,6 +8,8 @@ let SetWindowDisplayAffinity: ((hwnd: number, affinity: number) => boolean) | nu
 let GetLastError: (() => number) | null = null
 let GetWindowLongW: ((hwnd: number, nIndex: number) => number) | null = null
 let SetWindowLongW: ((hwnd: number, nIndex: number, dwNewLong: number) => number) | null = null
+let GetForegroundWindow: (() => number) | null = null
+let GetWindowTextW: ((hwnd: number, buf: Buffer, maxCount: number) => number) | null = null
 const GWL_EXSTYLE = -20
 const WS_EX_LAYERED = 0x00080000
 
@@ -20,6 +22,8 @@ if (process.platform === "win32") {
     GetLastError = kernel32.func("uint32_t __stdcall GetLastError()")
     GetWindowLongW = user32.func("long __stdcall GetWindowLongW(uintptr_t hwnd, int nIndex)")
     SetWindowLongW = user32.func("long __stdcall SetWindowLongW(uintptr_t hwnd, int nIndex, long dwNewLong)")
+    GetForegroundWindow = user32.func("uintptr_t __stdcall GetForegroundWindow()")
+    GetWindowTextW = user32.func("int __stdcall GetWindowTextW(uintptr_t hwnd, uint16_t*, int nMaxCount)")
   } catch (err) {
     console.warn("[WindowHelper] koffi not available, display affinity disabled:", err)
   }
@@ -44,6 +48,8 @@ export class WindowHelper {
   private windowSize: { width: number; height: number } | null = null
   private appState: AppState
   private stealthMode: boolean = false
+  private screenShareDetectionInterval: ReturnType<typeof setInterval> | null = null
+  private autoStealthActive: boolean = false
 
   private screenWidth: number = 0
   private screenHeight: number = 0
@@ -451,5 +457,88 @@ export class WindowHelper {
     const newW = Math.max(300, w + dw)
     const newH = Math.max(100, h + dh)
     this.mainWindow.setSize(Math.round(newW), Math.round(newH))
+  }
+
+  // ── Screen share detection ──
+  // Polls the foreground window title every 3s. If a known screen-sharing app
+  // (Zoom, Teams, Meet, Discord, Webex) is detected with a sharing indicator,
+  // auto-enable stealth mode. Restore when sharing stops.
+
+  private static SCREEN_SHARE_PATTERNS = [
+    /zoom/i,
+    /teams/i,
+    /google meet/i,
+    /meet\.google/i,
+    /webex/i,
+    /discord/i,
+    /screen share/i,
+    /sharing your screen/i,
+    /you are sharing/i,
+    /presenting/i,
+  ]
+
+  private getForegroundWindowTitle(): string {
+    if (!GetForegroundWindow || !GetWindowTextW) return ""
+    try {
+      const hwnd = GetForegroundWindow()
+      if (!hwnd) return ""
+      const buf = Buffer.alloc(512)
+      const len = GetWindowTextW(hwnd, buf, 256)
+      if (len <= 0) return ""
+      // GetWindowTextW writes UTF-16LE
+      return buf.slice(0, len * 2).toString("utf16le")
+    } catch {
+      return ""
+    }
+  }
+
+  public startScreenShareDetection(): void {
+    if (this.screenShareDetectionInterval) return
+    if (process.platform !== "win32") return
+
+    console.log("[WindowHelper] Screen share detection started")
+    this.screenShareDetectionInterval = setInterval(() => {
+      const title = this.getForegroundWindowTitle()
+      if (!title) return
+
+      const isSharing = WindowHelper.SCREEN_SHARE_PATTERNS.some((p) => p.test(title))
+
+      if (isSharing && !this.autoStealthActive) {
+        // Detected screen sharing app — auto-enable stealth
+        this.autoStealthActive = true
+        if (!this.stealthMode) {
+          console.log(`[WindowHelper] Auto-stealth ON (detected: "${title.slice(0, 60)}")`)
+          this.stealthMode = true
+          this.applyDisplayAffinity()
+          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send("stealth-mode-changed", true)
+          }
+        }
+      } else if (!isSharing && this.autoStealthActive) {
+        // Screen sharing app no longer in foreground — disable auto-stealth
+        this.autoStealthActive = false
+        if (this.stealthMode) {
+          console.log("[WindowHelper] Auto-stealth OFF")
+          this.stealthMode = false
+          this.removeDisplayAffinity()
+          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send("stealth-mode-changed", false)
+          }
+        }
+      }
+    }, 3000)
+  }
+
+  public stopScreenShareDetection(): void {
+    if (this.screenShareDetectionInterval) {
+      clearInterval(this.screenShareDetectionInterval)
+      this.screenShareDetectionInterval = null
+      this.autoStealthActive = false
+      console.log("[WindowHelper] Screen share detection stopped")
+    }
+  }
+
+  public isStealthMode(): boolean {
+    return this.stealthMode
   }
 }

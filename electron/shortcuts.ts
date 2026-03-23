@@ -142,6 +142,8 @@ export class ShortcutsHelper {
       this.appState.toggleStealthMode()
     })
 
+
+
     // Record shortcut
     register("CommandOrControl+Shift+O", () => {
       const mainWindow = this.appState.getMainWindow()

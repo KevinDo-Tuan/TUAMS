@@ -484,6 +484,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                     { label: 'Solve', keys: ['Ctrl', 'Shift', 'Enter'], desc: 'Generate solution from screenshots' },
                     { label: 'Record', keys: ['Ctrl', 'Shift', 'O'], desc: 'Record screen + mic' },
                     { label: 'Listen', keys: ['Ctrl', 'Shift', 'J'], desc: 'Listen & transcribe audio' },
+                    { label: 'Ask AI', keys: ['H'], desc: 'Send transcript to chat (while listening)' },
                     { label: 'Chat', keys: ['Ctrl', 'Shift', 'C'], desc: 'Toggle chat window' },
                     { label: 'Reset', keys: ['Ctrl', 'Shift', 'R'], desc: 'Clear all screenshots & reset' },
                     { label: 'Copy & Ask AI', keys: ['Ctrl', 'Shift', 'K'], desc: 'Copy page text & send to AI' },

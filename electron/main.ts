@@ -12,6 +12,7 @@ import {
   isVoskModelDownloaded,
   downloadVoskModel,
   preloadVoskModel,
+  loadLanguageConfig,
 } from "./StreamingSpeech"
 
 export class AppState {
@@ -132,6 +133,10 @@ export class AppState {
 
   public toggleStealthMode(): void {
     this.windowHelper.toggleStealthMode()
+  }
+
+  public startScreenShareDetection(): void {
+    this.windowHelper.startScreenShareDetection()
   }
 
   public setWindowDimensions(width: number, height: number): void {
@@ -336,6 +341,8 @@ async function initializeApp() {
     })
 
     appState.createTray()
+    // Load language preference
+    loadLanguageConfig()
     // Register global shortcuts using ShortcutsHelper
     appState.shortcutsHelper.registerGlobalShortcuts()
 
@@ -358,7 +365,11 @@ async function initializeApp() {
         if (!isVoskModelDownloaded()) {
           console.log("[App] Downloading vosk speech model...")
           await downloadVoskModel((file, pct) => {
-            if (pct % 25 === 0) console.log(`[App] vosk model: ${file} ${pct}%`)
+            if (pct < 0) {
+              console.log(`[App] vosk model: ${file} ${-pct} MB downloaded`)
+            } else if (pct % 25 === 0) {
+              console.log(`[App] vosk model: ${file} ${pct}%`)
+            }
           })
           console.log("[App] vosk model download complete")
         } else {
@@ -390,6 +401,7 @@ async function initializeApp() {
 
       console.log("[App] All downloads complete, creating window...")
       appState.createWindow()
+      appState.startScreenShareDetection()
     })()
   })
 

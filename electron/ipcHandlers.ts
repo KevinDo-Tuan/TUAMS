@@ -13,6 +13,12 @@ import {
   isVoskModelDownloaded,
   downloadVoskModel,
   getVoskModelTarGz,
+  getAvailableLanguages,
+  getCurrentLanguage,
+  saveLanguageConfig,
+  downloadVoskLanguage,
+  getVoskModelTarGzForLang,
+  VOSK_LANGUAGES,
 } from "./StreamingSpeech"
 
 export function initializeIpcHandlers(appState: AppState): void {
@@ -530,11 +536,50 @@ $rec.Dispose()
   // Get vosk model as tar.gz buffer (for vosk-browser in renderer)
   ipcMain.handle("stt-get-vosk-targz", async () => {
     try {
-      const buffer = await getVoskModelTarGz()
+      // Use current language model
+      const lang = getCurrentLanguage()
+      const buffer = await getVoskModelTarGzForLang(lang)
       return { success: true, data: buffer.toString("base64") }
     } catch (err: any) {
       console.error("[STT] Vosk tar.gz creation failed:", err.message)
       return { success: false, error: err.message }
     }
+  })
+
+  // ── Language management ──
+  ipcMain.handle("stt-get-languages", async () => {
+    return getAvailableLanguages()
+  })
+
+  ipcMain.handle("stt-get-current-language", async () => {
+    const lang = getCurrentLanguage()
+    return { code: lang.code, name: lang.name }
+  })
+
+  ipcMain.handle("stt-switch-language", async (_event, code: string) => {
+    const lang = VOSK_LANGUAGES.find(l => l.code === code)
+    if (!lang) return { success: false, error: "Unknown language" }
+
+    // Check if model is downloaded
+    const languages = getAvailableLanguages()
+    const target = languages.find(l => l.code === code)
+    if (!target?.downloaded) {
+      // Download the model
+      const mainWindow = appState.getMainWindow()
+      try {
+        await downloadVoskLanguage(lang, (file, pct) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("language-download-progress", { code, file, pct })
+          }
+        })
+        // Build tar.gz cache
+        await getVoskModelTarGzForLang(lang)
+      } catch (err: any) {
+        return { success: false, error: err.message }
+      }
+    }
+
+    saveLanguageConfig(code)
+    return { success: true, name: lang.name }
   })
 }

@@ -37,6 +37,13 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'))
   const tooltipRef = useRef<HTMLDivElement>(null)
 
+  // Language selector state
+  const [currentLang, setCurrentLang] = useState<{ code: string; name: string }>({ code: "en", name: "English" })
+  const [languages, setLanguages] = useState<Array<{ code: string; name: string; downloaded: boolean }>>([])
+  const [isLangPickerOpen, setIsLangPickerOpen] = useState(false)
+  const [langDownloading, setLangDownloading] = useState<string | null>(null)
+  const langPickerRef = useRef<HTMLDivElement>(null)
+
   // Screen + mic recording state
   const [isRecording, setIsRecording] = useState(false)
   const isRecordingRef = useRef(false)
@@ -99,6 +106,62 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     }
     onTooltipVisibilityChange(isTooltipVisible, tooltipHeight)
   }, [isTooltipVisible])
+
+  // Load available languages on mount
+  useEffect(() => {
+    window.electronAPI.invoke("stt-get-languages").then((langs: Array<{ code: string; name: string; downloaded: boolean }>) => {
+      setLanguages(langs)
+    }).catch(() => {})
+    window.electronAPI.invoke("stt-get-current-language").then((lang: { code: string; name: string }) => {
+      setCurrentLang(lang)
+    }).catch(() => {})
+
+    // Close language picker on outside click
+    const handleClickOutside = (e: MouseEvent) => {
+      if (langPickerRef.current && !langPickerRef.current.contains(e.target as Node)) {
+        setIsLangPickerOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
+
+  const handleLanguageSwitch = async (code: string) => {
+    if (langDownloading) return
+    setLangDownloading(code)
+    try {
+      const result = await window.electronAPI.invoke("stt-switch-language", code)
+      if (result.success) {
+        setCurrentLang({ code, name: result.name })
+        // Refresh languages list (downloaded status may have changed)
+        const langs = await window.electronAPI.invoke("stt-get-languages")
+        setLanguages(langs)
+      }
+    } catch (err) {
+      console.error("[Lang] Switch failed:", err)
+    } finally {
+      setLangDownloading(null)
+      setIsLangPickerOpen(false)
+    }
+  }
+
+  // "H" key — send current transcript to chat while in listen mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only trigger when listening and no input/textarea is focused
+      if (!isListeningRef.current) return
+      if (e.key !== "h" && e.key !== "H") return
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase()
+      if (tag === "input" || tag === "textarea" || (e.target as HTMLElement)?.isContentEditable) return
+
+      e.preventDefault()
+      const transcript = listenTranscriptRef.current.trim()
+      if (!transcript || transcript.length < 5) return
+      onVoiceMessage(transcript)
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [onVoiceMessage])
 
   // Cleanup on unmount
   useEffect(() => {
@@ -835,6 +898,21 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         </div>
       </div>
 
+      {/* Ask AI (while listening) */}
+      {isListening && (
+        <>
+          <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
+          <div className="flex items-center gap-1.5 group/cmd animate-fade-in">
+            <span className="cmd-label text-[11px] leading-none text-[hsl(0,0%,8%)] font-medium transition-colors duration-200 group-hover/cmd:text-black">
+              Ask AI
+            </span>
+            <div className="flex gap-0.5">
+              <Kbd>H</Kbd>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Solve */}
       {screenshots.length > 0 && (
         <>
@@ -937,6 +1015,50 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         )}
       </button>
 
+      {/* Language selector */}
+      <div className="relative" ref={langPickerRef}>
+        <button
+          className="w-auto h-5 px-1.5 rounded-full bg-white/8 hover:bg-white/15 transition-all duration-200 flex items-center justify-center border border-white/5 hover:border-white/10 interactive gap-1"
+          title={`Language: ${currentLang.name}`}
+          onClick={() => setIsLangPickerOpen(!isLangPickerOpen)}
+          type="button"
+        >
+          <span className="text-[9px] bar-icon font-medium uppercase">{currentLang.code}</span>
+          <svg className="w-2 h-2 bar-icon opacity-50" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+          </svg>
+        </button>
+        {isLangPickerOpen && (
+          <div className="absolute top-7 right-0 z-50 w-40 max-h-48 overflow-y-auto liquid-glass-dark shadow-2xl rounded-lg p-1.5 animate-slide-up">
+            {languages.map((lang) => (
+              <button
+                key={lang.code}
+                className={`w-full text-left px-2 py-1.5 rounded text-[11px] transition-colors duration-150 flex items-center justify-between ${
+                  lang.code === currentLang.code
+                    ? 'bg-white/15 text-white'
+                    : 'hover:bg-white/10 text-[hsl(0,0%,70%)]'
+                }`}
+                onClick={() => handleLanguageSwitch(lang.code)}
+                disabled={langDownloading !== null}
+                type="button"
+              >
+                <span>{lang.name}</span>
+                <span className="flex items-center gap-1">
+                  {langDownloading === lang.code && (
+                    <span className="text-[9px] text-indigo-400 animate-pulse">...</span>
+                  )}
+                  {lang.downloaded ? (
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-400/60" title="Downloaded" />
+                  ) : (
+                    <span className="text-[9px] text-white/30">DL</span>
+                  )}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Help toggle */}
       <button
         className="inline-block interactive"
@@ -993,6 +1115,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
                 { label: 'Solve', keys: ['Ctrl', 'Shift', 'Enter'], desc: 'Generate solution from screenshots' },
                 { label: 'Record', keys: ['Ctrl', 'Shift', 'O'], desc: 'Record screen + mic' },
                 { label: 'Listen', keys: ['Ctrl', 'Shift', 'J'], desc: 'Listen & transcribe audio' },
+                { label: 'Ask AI', keys: ['H'], desc: 'Send transcript to chat (while listening)' },
                 { label: 'Chat', keys: ['Ctrl', 'Shift', 'C'], desc: 'Toggle chat window' },
                 { label: 'Reset', keys: ['Ctrl', 'Shift', 'R'], desc: 'Clear all screenshots & reset' },
                 { label: 'Copy & Ask AI', keys: ['Ctrl', 'Shift', 'K'], desc: 'Copy page text & send to AI' },
