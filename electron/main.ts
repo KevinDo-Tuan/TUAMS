@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, powerMonitor, session } from "electron"
+import { app, BrowserWindow, Tray, Menu, nativeImage, powerMonitor, session, Notification } from "electron"
 import { spawn } from "child_process"
 import path from "path"
 import { initializeIpcHandlers } from "./ipcHandlers"
@@ -364,13 +364,22 @@ async function initializeApp() {
       try {
         if (!isVoskModelDownloaded()) {
           console.log("[App] Downloading vosk speech model...")
-          await downloadVoskModel((file, pct) => {
-            if (pct < 0) {
-              console.log(`[App] vosk model: ${file} ${-pct} MB downloaded`)
-            } else if (pct % 25 === 0) {
-              console.log(`[App] vosk model: ${file} ${pct}%`)
+          await downloadVoskModel(
+            (file, pct) => {
+              if (pct < 0) {
+                console.log(`[App] vosk model: ${file} ${-pct} MB downloaded`)
+              } else if (pct % 25 === 0) {
+                console.log(`[App] vosk model: ${file} ${pct}%`)
+              }
+            },
+            (retryNum, maxRetries) => {
+              console.warn(`[App] Vosk download stalled, retrying ${retryNum}/${maxRetries}...`)
+              new Notification({
+                title: "Download Stalled",
+                body: `Vosk model download stalled. Retrying (${retryNum}/${maxRetries})...`,
+              }).show()
             }
-          })
+          )
           console.log("[App] vosk model download complete")
         } else {
           console.log("[App] vosk model already downloaded")

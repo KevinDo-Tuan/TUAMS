@@ -16,17 +16,17 @@ export interface VoskLanguage {
 }
 
 export const VOSK_LANGUAGES: VoskLanguage[] = [
-  { code: "en", name: "English", modelDir: "vosk-model-en-us-0.22-lgraph", zipUrl: "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
-  { code: "zh", name: "Chinese", modelDir: "vosk-model-small-cn-0.22", zipUrl: "https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
-  { code: "es", name: "Spanish", modelDir: "vosk-model-small-es-0.42", zipUrl: "https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
-  { code: "fr", name: "French", modelDir: "vosk-model-small-fr-0.22", zipUrl: "https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
-  { code: "de", name: "German", modelDir: "vosk-model-small-de-0.15", zipUrl: "https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
-  { code: "ru", name: "Russian", modelDir: "vosk-model-small-ru-0.22", zipUrl: "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
-  { code: "ja", name: "Japanese", modelDir: "vosk-model-small-ja-0.22", zipUrl: "https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
-  { code: "ko", name: "Korean", modelDir: "vosk-model-small-ko-0.22", zipUrl: "https://alphacephei.com/vosk/models/vosk-model-small-ko-0.22.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
-  { code: "pt", name: "Portuguese", modelDir: "vosk-model-small-pt-0.3", zipUrl: "https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
-  { code: "it", name: "Italian", modelDir: "vosk-model-small-it-0.22", zipUrl: "https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
-  { code: "vi", name: "Vietnamese", modelDir: "vosk-model-small-vn-0.4", zipUrl: "https://alphacephei.com/vosk/models/vosk-model-small-vn-0.4.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
+  { code: "en", name: "English", modelDir: "vosk-model-en-us-0.22-lgraph", zipUrl: "https://huggingface.co/rhasspy/vosk-models/resolve/main/en/vosk-model-en-us-0.22-lgraph.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
+  { code: "zh", name: "Chinese", modelDir: "vosk-model-small-cn-0.22", zipUrl: "https://huggingface.co/rhasspy/vosk-models/resolve/main/zh/vosk-model-small-cn-0.22.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
+  { code: "es", name: "Spanish", modelDir: "vosk-model-small-es-0.42", zipUrl: "https://huggingface.co/rhasspy/vosk-models/resolve/main/es/vosk-model-small-es-0.42.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
+  { code: "fr", name: "French", modelDir: "vosk-model-small-fr-0.22", zipUrl: "https://huggingface.co/rhasspy/vosk-models/resolve/main/fr/vosk-model-small-fr-0.22.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
+  { code: "de", name: "German", modelDir: "vosk-model-small-de-0.15", zipUrl: "https://huggingface.co/rhasspy/vosk-models/resolve/main/de/vosk-model-small-de-0.15.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
+  { code: "ru", name: "Russian", modelDir: "vosk-model-small-ru-0.22", zipUrl: "https://huggingface.co/rhasspy/vosk-models/resolve/main/ru/vosk-model-small-ru-0.22.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
+  { code: "ja", name: "Japanese", modelDir: "vosk-model-small-ja-0.22", zipUrl: "https://huggingface.co/rhasspy/vosk-models/resolve/main/ja/vosk-model-small-ja-0.22.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
+  { code: "ko", name: "Korean", modelDir: "vosk-model-small-ko-0.22", zipUrl: "https://huggingface.co/rhasspy/vosk-models/resolve/main/ko/vosk-model-small-ko-0.22.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
+  { code: "pt", name: "Portuguese", modelDir: "vosk-model-small-pt-0.3", zipUrl: "https://huggingface.co/rhasspy/vosk-models/resolve/main/pt/vosk-model-small-pt-0.3.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
+  { code: "it", name: "Italian", modelDir: "vosk-model-small-it-0.22", zipUrl: "https://huggingface.co/rhasspy/vosk-models/resolve/main/it/vosk-model-small-it-0.22.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
+  { code: "vi", name: "Vietnamese", modelDir: "vosk-model-small-vn-0.4", zipUrl: "https://huggingface.co/rhasspy/vosk-models/resolve/main/vi/vosk-model-small-vn-0.4.zip", checkFiles: ["am/final.mdl", "conf/mfcc.conf"] },
 ]
 
 // Current active language (persisted via simple JSON file)
@@ -198,74 +198,142 @@ const SHERPA_MODEL_FILES: Record<string, string> = {
 // Default English model (kept for backward compat with existing download checks)
 const VOSK_MODEL_DIR = "vosk-model-en-us-0.22-lgraph"
 const VOSK_MODEL_ZIP_URL =
-  "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip"
+  "https://huggingface.co/rhasspy/vosk-models/resolve/main/en/vosk-model-en-us-0.22-lgraph.zip"
 
-// ── Download helper ──
+// ── Download helper (with resume + stall detection + auto-retry) ──
+const STALL_TIMEOUT_MS = 30_000 // 30s no data = stalled
+const MAX_RETRIES = 5
+
 function downloadFile(
   url: string,
   dest: string,
-  onProgress?: (percent: number) => void
+  onProgress?: (percent: number) => void,
+  onStall?: (retryNum: number, maxRetries: number) => void
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const follow = (currentUrl: string, redirects = 0) => {
-      if (redirects > 10) {
-        reject(new Error("Too many redirects"))
-        return
+  const dir = path.dirname(dest)
+  fs.mkdirSync(dir, { recursive: true })
+
+  const attempt = (retryNum: number): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      // Check existing bytes for resume
+      let existingSize = 0
+      try { existingSize = fs.statSync(dest).size } catch {}
+
+      let stallTimer: ReturnType<typeof setTimeout> | null = null
+      let currentRes: any = null
+
+      const resetStallTimer = () => {
+        if (stallTimer) clearTimeout(stallTimer)
+        stallTimer = setTimeout(() => {
+          console.warn(`[Download] Stalled for ${STALL_TIMEOUT_MS / 1000}s, aborting...`)
+          if (currentRes) currentRes.destroy()
+          onStall?.(retryNum + 1, MAX_RETRIES)
+          if (retryNum + 1 < MAX_RETRIES) {
+            console.log(`[Download] Retry ${retryNum + 1}/${MAX_RETRIES}...`)
+            attempt(retryNum + 1).then(resolve, reject)
+          } else {
+            reject(new Error(`Download stalled after ${MAX_RETRIES} retries`))
+          }
+        }, STALL_TIMEOUT_MS)
       }
-      const parsed = new URL(currentUrl)
-      const proto = parsed.protocol === "https:" ? https : http
-      proto
-        .get(currentUrl, (res) => {
-          if (
-            res.statusCode &&
-            [301, 302, 303, 307, 308].includes(res.statusCode) &&
-            res.headers.location
-          ) {
-            // Resolve relative redirect URLs against the current URL
+
+      const follow = (currentUrl: string, redirects = 0) => {
+        if (redirects > 10) { reject(new Error("Too many redirects")); return }
+        const parsed = new URL(currentUrl)
+        const proto = parsed.protocol === "https:" ? https : http
+        const options: any = {
+          hostname: parsed.hostname,
+          port: parsed.port,
+          path: parsed.pathname + parsed.search,
+          headers: {} as Record<string, string>,
+        }
+        if (existingSize > 0) {
+          options.headers["Range"] = `bytes=${existingSize}-`
+          console.log(`[Download] Resuming from ${(existingSize / 1024 / 1024).toFixed(1)} MB`)
+        }
+
+        resetStallTimer()
+
+        proto.get(options, (res) => {
+          currentRes = res
+
+          if (res.statusCode && [301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
             const next = new URL(res.headers.location, currentUrl).toString()
             follow(next, redirects + 1)
             return
           }
-          if (res.statusCode !== 200) {
+
+          const isResume = res.statusCode === 206
+          if (!isResume && res.statusCode !== 200) {
+            if (stallTimer) clearTimeout(stallTimer)
             reject(new Error(`Download failed: HTTP ${res.statusCode} for ${currentUrl}`))
             return
           }
-          const total = parseInt(res.headers["content-length"] || "0", 10)
+
+          let total = 0
           let received = 0
+          let file: fs.WriteStream
+
+          if (isResume) {
+            const contentRange = res.headers["content-range"] || ""
+            const totalMatch = contentRange.match(/\/(\d+)/)
+            total = totalMatch ? parseInt(totalMatch[1], 10) : 0
+            received = existingSize
+            file = fs.createWriteStream(dest, { flags: "a" })
+            console.log(`[Download] Resumed: ${(existingSize / 1024 / 1024).toFixed(1)} MB done, total ${total ? (total / 1024 / 1024).toFixed(1) + " MB" : "unknown"}`)
+          } else {
+            if (existingSize > 0) console.log("[Download] Server doesn't support resume, restarting")
+            total = parseInt(res.headers["content-length"] || "0", 10)
+            file = fs.createWriteStream(dest)
+          }
+
           let lastReported = -1
-          const dir = path.dirname(dest)
-          fs.mkdirSync(dir, { recursive: true })
-          const file = fs.createWriteStream(dest)
+
           res.on("data", (chunk: Buffer) => {
+            resetStallTimer()
             received += chunk.length
             file.write(chunk)
             if (total > 0) {
               const pct = Math.round((received / total) * 100)
-              if (pct !== lastReported) {
-                lastReported = pct
-                onProgress?.(pct)
-              }
+              if (pct !== lastReported) { lastReported = pct; onProgress?.(pct) }
             } else {
-              // No Content-Length — report negative value as MB downloaded
               const mb = Math.floor(received / (1024 * 1024))
-              if (mb !== lastReported) {
-                lastReported = mb
-                onProgress?.(-mb)
-              }
+              if (mb !== lastReported) { lastReported = mb; onProgress?.(-mb) }
             }
           })
           res.on("end", () => {
+            if (stallTimer) clearTimeout(stallTimer)
             file.end(() => resolve())
           })
           res.on("error", (err) => {
+            if (stallTimer) clearTimeout(stallTimer)
             file.close()
-            reject(err)
+            // Connection reset/abort mid-download — retry with resume
+            if (retryNum + 1 < MAX_RETRIES) {
+              console.warn(`[Download] Stream error: ${err.message}, retry ${retryNum + 1}/${MAX_RETRIES}...`)
+              onStall?.(retryNum + 1, MAX_RETRIES)
+              attempt(retryNum + 1).then(resolve, reject)
+            } else {
+              reject(err)
+            }
           })
+        }).on("error", (err) => {
+          if (stallTimer) clearTimeout(stallTimer)
+          // Network error — retry if possible
+          if (retryNum + 1 < MAX_RETRIES) {
+            console.warn(`[Download] Network error: ${err.message}, retry ${retryNum + 1}/${MAX_RETRIES}...`)
+            onStall?.(retryNum + 1, MAX_RETRIES)
+            attempt(retryNum + 1).then(resolve, reject)
+          } else {
+            reject(err)
+          }
         })
-        .on("error", reject)
-    }
-    follow(url)
-  })
+      }
+      follow(url)
+    })
+  }
+
+  return attempt(0)
 }
 
 // ── Model paths ──
@@ -318,7 +386,8 @@ export function isVoskModelDownloaded(): boolean {
 }
 
 export async function downloadVoskModel(
-  onProgress?: (file: string, percent: number) => void
+  onProgress?: (file: string, percent: number) => void,
+  onStall?: (retryNum: number, maxRetries: number) => void
 ): Promise<void> {
   const modelsDir = getModelsDir()
   fs.mkdirSync(modelsDir, { recursive: true })
@@ -327,7 +396,7 @@ export async function downloadVoskModel(
 
   // Download zip
   console.log("[VoskModel] Downloading zip from alphacephei.com...")
-  await downloadFile(VOSK_MODEL_ZIP_URL, zipPath, (pct) => onProgress?.("zip", pct))
+  await downloadFile(VOSK_MODEL_ZIP_URL, zipPath, (pct) => onProgress?.("zip", pct), onStall)
   console.log("[VoskModel] Zip downloaded, extracting...")
 
   // Extract zip using Node.js built-in (Electron ships with zlib)
