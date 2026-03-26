@@ -69,7 +69,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const listenRecorderRef = useRef<MediaRecorder | null>(null)
   const listenTranscriptRef = useRef<string>("")
   const listenStoppingRef = useRef<boolean>(false)
-  const listenEngineRef = useRef<"sherpa" | "vosk" | "chunked" | null>(null)
+  const listenEngineRef = useRef<"deepgram" | "assemblyai" | "google-stt" | "sherpa" | "vosk" | "chunked" | null>(null)
   const listenCleanupRef = useRef<(() => void) | null>(null)
   const voskRecognizerRef = useRef<any>(null)
 
@@ -500,30 +500,49 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     return { audioCtx, dest }
   }
 
-  // Create a ScriptProcessorNode that extracts float32 PCM at 16kHz
-  const createPcmProcessor = (
+  // Create PCM processor: AudioWorkletNode (low-latency) with ScriptProcessor fallback
+  const createPcmProcessor = async (
     audioCtx: AudioContext,
     dest: MediaStreamAudioDestinationNode,
     onPcmChunk: (float32: Float32Array) => void
   ) => {
-    const processor = audioCtx.createScriptProcessor(4096, 1, 1)
-    listenProcessorRef.current = processor
     const mixedSource = audioCtx.createMediaStreamSource(dest.stream)
+
+    // Try AudioWorkletNode first (runs on audio thread, much lower latency)
+    try {
+      await audioCtx.audioWorklet.addModule('/pcm-worklet.js')
+      const workletNode = new AudioWorkletNode(audioCtx, 'pcm-downsampler')
+      workletNode.port.onmessage = (e: MessageEvent) => {
+        onPcmChunk(e.data as Float32Array)
+      }
+      mixedSource.connect(workletNode)
+      workletNode.connect(audioCtx.destination)
+      listenProcessorRef.current = workletNode as any
+      console.log("[Audio] Using AudioWorkletNode (low-latency)")
+      return
+    } catch (err) {
+      console.log("[Audio] AudioWorklet unavailable, falling back to ScriptProcessor:", err)
+    }
+
+    // Fallback: ScriptProcessorNode
+    const processor = audioCtx.createScriptProcessor(2048, 1, 1)
+    listenProcessorRef.current = processor
     mixedSource.connect(processor)
-    processor.connect(audioCtx.destination) // must be connected to stay alive
+    processor.connect(audioCtx.destination)
 
     const srcRate = audioCtx.sampleRate
     const targetRate = 16000
+    const ratio = srcRate / targetRate
+    const bufLen = Math.ceil(2048 / ratio)
+    const reusable = new Float32Array(bufLen)
 
     processor.onaudioprocess = (e: AudioProcessingEvent) => {
       const input = e.inputBuffer.getChannelData(0)
-      const ratio = srcRate / targetRate
       const newLen = Math.floor(input.length / ratio)
-      const downsampled = new Float32Array(newLen)
       for (let i = 0; i < newLen; i++) {
-        downsampled[i] = input[Math.floor(i * ratio)]
+        reusable[i] = input[Math.floor(i * ratio)]
       }
-      onPcmChunk(downsampled)
+      onPcmChunk(reusable.subarray(0, newLen))
     }
   }
 
@@ -535,7 +554,105 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     return btoa(binary)
   }
 
-  // ── Strategy A: sherpa-onnx (main process, true streaming) ──
+  // ── Strategy A: Deepgram cloud streaming (best accuracy + lowest latency) ──
+  const startDeepgramListen = async (
+    audioCtx: AudioContext,
+    dest: MediaStreamAudioDestinationNode
+  ): Promise<boolean> => {
+    try {
+      const initResult: { success: boolean; error?: string } =
+        await window.electronAPI.invoke("stt-init-deepgram")
+      if (!initResult.success) throw new Error(initResult.error || "Deepgram init failed")
+
+      // Listen for live-transcript events from main process
+      const cleanup = (window.electronAPI as any).onLiveTranscript((data: { type: string; text: string }) => {
+        if (data.text) {
+          listenTranscriptRef.current = data.text
+          setListenStatus(data.text)
+        }
+      })
+      listenCleanupRef.current = cleanup
+
+      // Feed PCM to Deepgram via main process
+      await createPcmProcessor(audioCtx, dest, (float32) => {
+        const base64 = float32ToBase64(float32)
+        window.electronAPI.invoke("stt-feed-audio-deepgram", base64)
+      })
+
+      listenEngineRef.current = "deepgram"
+      console.log("[Listen] Using Deepgram cloud engine")
+      return true
+    } catch (err: any) {
+      console.log("[Listen] Deepgram failed:", err.message)
+      return false
+    }
+  }
+
+  // ── Strategy B: AssemblyAI cloud streaming ──
+  const startAssemblyAIListen = async (
+    audioCtx: AudioContext,
+    dest: MediaStreamAudioDestinationNode
+  ): Promise<boolean> => {
+    try {
+      const initResult: { success: boolean; error?: string } =
+        await window.electronAPI.invoke("stt-init-assemblyai")
+      if (!initResult.success) throw new Error(initResult.error || "AssemblyAI init failed")
+
+      const cleanup = (window.electronAPI as any).onLiveTranscript((data: { type: string; text: string }) => {
+        if (data.text) {
+          listenTranscriptRef.current = data.text
+          setListenStatus(data.text)
+        }
+      })
+      listenCleanupRef.current = cleanup
+
+      await createPcmProcessor(audioCtx, dest, (float32) => {
+        const base64 = float32ToBase64(float32)
+        window.electronAPI.invoke("stt-feed-audio-assemblyai", base64)
+      })
+
+      listenEngineRef.current = "assemblyai"
+      console.log("[Listen] Using AssemblyAI cloud engine")
+      return true
+    } catch (err: any) {
+      console.log("[Listen] AssemblyAI failed:", err.message)
+      return false
+    }
+  }
+
+  // ── Strategy C: Google Cloud STT ──
+  const startGoogleSTTListen = async (
+    audioCtx: AudioContext,
+    dest: MediaStreamAudioDestinationNode
+  ): Promise<boolean> => {
+    try {
+      const initResult: { success: boolean; error?: string } =
+        await window.electronAPI.invoke("stt-init-google-stt")
+      if (!initResult.success) throw new Error(initResult.error || "Google STT init failed")
+
+      const cleanup = (window.electronAPI as any).onLiveTranscript((data: { type: string; text: string }) => {
+        if (data.text) {
+          listenTranscriptRef.current = data.text
+          setListenStatus(data.text)
+        }
+      })
+      listenCleanupRef.current = cleanup
+
+      await createPcmProcessor(audioCtx, dest, (float32) => {
+        const base64 = float32ToBase64(float32)
+        window.electronAPI.invoke("stt-feed-audio-google-stt", base64)
+      })
+
+      listenEngineRef.current = "google-stt"
+      console.log("[Listen] Using Google Cloud STT engine")
+      return true
+    } catch (err: any) {
+      console.log("[Listen] Google STT failed:", err.message)
+      return false
+    }
+  }
+
+  // ── Strategy D: sherpa-onnx (main process, true streaming) ──
   // Note: sherpa is pre-initialized in handleListenClick parallel flow
   const startSherpaListen = async (
     audioCtx: AudioContext,
@@ -553,7 +670,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       listenCleanupRef.current = cleanup
 
       // Feed PCM to main process
-      createPcmProcessor(audioCtx, dest, (float32) => {
+      await createPcmProcessor(audioCtx, dest, (float32) => {
         const base64 = float32ToBase64(float32)
         window.electronAPI.invoke("stt-feed-audio", base64)
       })
@@ -582,23 +699,19 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         if (!dl.success) throw new Error(dl.error || "Download failed")
       }
 
-      // Get model tar.gz from main process
+      // Get model tar.gz URL from local HTTP server
       setListenStatus("Loading vosk model...")
-      const tarResult: { success: boolean; data?: string; error?: string } =
+      const tarResult: { success: boolean; url?: string; error?: string } =
         await window.electronAPI.invoke("stt-get-vosk-targz")
-      if (!tarResult.success || !tarResult.data) throw new Error(tarResult.error || "No tar.gz data")
+      if (!tarResult.success || !tarResult.url) throw new Error(tarResult.error || "No model URL")
 
-      // Create blob URL from base64
-      const tarBytes = Uint8Array.from(atob(tarResult.data), c => c.charCodeAt(0))
-      const blob = new Blob([tarBytes], { type: "application/gzip" })
-      const modelUrl = URL.createObjectURL(blob)
+      const modelUrl = tarResult.url
 
       // Create vosk model and recognizer
       const model = await (Vosk as any).createModel(modelUrl)
-      URL.revokeObjectURL(modelUrl)
 
       const recognizer = new model.KaldiRecognizer(16000)
-      recognizer.setWords(true)
+      recognizer.setWords(false) // disable word-level alignment for lower latency
       voskRecognizerRef.current = recognizer
 
       // Listen for partial and final results
@@ -620,7 +733,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       })
 
       // Feed PCM to vosk recognizer
-      createPcmProcessor(audioCtx, dest, (float32) => {
+      await createPcmProcessor(audioCtx, dest, (float32) => {
         try {
           // vosk-browser expects AudioBuffer or acceptWaveformFloat
           recognizer.acceptWaveformFloat(float32, 16000)
@@ -715,7 +828,18 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
     const engine = listenEngineRef.current
 
-    if (engine === "sherpa") {
+    if (engine === "deepgram" || engine === "assemblyai" || engine === "google-stt") {
+      stopListenStreams()
+      const stopCmd = engine === "deepgram" ? "stt-stop-deepgram"
+        : engine === "assemblyai" ? "stt-stop-assemblyai"
+        : "stt-stop-google-stt"
+      try {
+        await window.electronAPI.invoke(stopCmd)
+        setListenStatus("Stopped")
+      } catch { setListenStatus("Error stopping") }
+      setTimeout(() => setListenStatus(null), 3000)
+      setListenElapsed(0)
+    } else if (engine === "sherpa") {
       stopListenStreams()
       try {
         await window.electronAPI.invoke("stt-stop-sherpa")
@@ -737,6 +861,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       if (listenRecorderRef.current && listenRecorderRef.current.state !== 'inactive') {
         listenRecorderRef.current.stop()
       } else {
+        
         stopListenStreams()
         setListenStatus("Stopped")
         setTimeout(() => setListenStatus(null), 3000)
@@ -765,11 +890,20 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         captureAudioStreams(),
         window.electronAPI.invoke("stt-init-sherpa").catch(() => ({ success: false }))
       ])
-      const { audioCtx, dest } = audioResult
+      const { audioCtx, dest } 
+      
+      = audioResult
 
-      // Try engines in order: sherpa-onnx → vosk-browser → chunked
+      // Try engines in order: Deepgram → AssemblyAI → Google STT → Sherpa → Vosk → Chunked
       let started = false
-      if (sherpaPreInit.success) {
+      started = await startDeepgramListen(audioCtx, dest)
+      if (!started) {
+        started = await startAssemblyAIListen(audioCtx, dest)
+      }
+      if (!started) {
+        started = await startGoogleSTTListen(audioCtx, dest)
+      }
+      if (!started && sherpaPreInit.success) {
         started = await startSherpaListen(audioCtx, dest)
       }
       if (!started) {

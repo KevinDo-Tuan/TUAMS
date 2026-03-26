@@ -8,6 +8,9 @@ import * as fs from "fs"
 import * as os from "os"
 import {
   SherpaEngine,
+  DeepgramEngine,
+  AssemblyAIEngine,
+  GoogleSTTEngine,
   isSherpaModelDownloaded,
   downloadSherpaModel,
   isVoskModelDownloaded,
@@ -489,11 +492,10 @@ $rec.Dispose()
     if (!sherpaEngine.isRunning()) return
     try {
       const buf = Buffer.from(base64Float32, "base64")
-      const float32 = new Float32Array(
-        buf.buffer,
-        buf.byteOffset,
-        buf.byteLength / 4
-      )
+      // Copy to a clean ArrayBuffer to avoid Node.js Buffer pool offset issues
+      const ab = new ArrayBuffer(buf.byteLength)
+      new Uint8Array(ab).set(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
+      const float32 = new Float32Array(ab)
       sherpaEngine.feedAudio(float32)
     } catch (err: any) {
       console.error("[STT] Feed error:", err.message)
@@ -503,6 +505,110 @@ $rec.Dispose()
   // Stop sherpa-onnx and get final text
   ipcMain.handle("stt-stop-sherpa", async () => {
     const text = sherpaEngine.stop()
+    return { success: true, text }
+  })
+
+  // ── Deepgram cloud streaming STT ──
+  const deepgramEngine = new DeepgramEngine()
+
+  ipcMain.handle("stt-init-deepgram", async () => {
+    const mainWindow = appState.getMainWindow()
+    if (!mainWindow) return { success: false, error: "No window" }
+    const ok = await deepgramEngine.init(mainWindow)
+    return { success: ok, error: ok ? undefined : "Deepgram init failed (no API key or connection error)" }
+  })
+
+  // Feed audio to Deepgram (Float32 PCM → converted to int16 PCM)
+  ipcMain.handle("stt-feed-audio-deepgram", async (_, base64Float32: string) => {
+    if (!deepgramEngine.isRunning()) return
+    try {
+      const buf = Buffer.from(base64Float32, "base64")
+      const ab = new ArrayBuffer(buf.byteLength)
+      new Uint8Array(ab).set(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
+      const float32 = new Float32Array(ab)
+
+      // Convert float32 [-1,1] to int16 [-32768,32767] for Deepgram linear16
+      const int16 = Buffer.alloc(float32.length * 2)
+      for (let i = 0; i < float32.length; i++) {
+        const s = Math.max(-1, Math.min(1, float32[i]))
+        int16.writeInt16LE(s < 0 ? s * 0x8000 : s * 0x7FFF, i * 2)
+      }
+      deepgramEngine.feedAudio(int16)
+    } catch (err: any) {
+      console.error("[STT] Deepgram feed error:", err.message)
+    }
+  })
+
+  ipcMain.handle("stt-stop-deepgram", async () => {
+    const text = deepgramEngine.stop()
+    return { success: true, text }
+  })
+
+  // ── AssemblyAI cloud streaming STT ──
+  const assemblyEngine = new AssemblyAIEngine()
+
+  ipcMain.handle("stt-init-assemblyai", async () => {
+    const mainWindow = appState.getMainWindow()
+    if (!mainWindow) return { success: false, error: "No window" }
+    const ok = await assemblyEngine.init(mainWindow)
+    return { success: ok, error: ok ? undefined : "AssemblyAI init failed" }
+  })
+
+  ipcMain.handle("stt-feed-audio-assemblyai", async (_, base64Float32: string) => {
+    if (!assemblyEngine.isRunning()) return
+    try {
+      const buf = Buffer.from(base64Float32, "base64")
+      const ab = new ArrayBuffer(buf.byteLength)
+      new Uint8Array(ab).set(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
+      const float32 = new Float32Array(ab)
+
+      const int16 = Buffer.alloc(float32.length * 2)
+      for (let i = 0; i < float32.length; i++) {
+        const s = Math.max(-1, Math.min(1, float32[i]))
+        int16.writeInt16LE(s < 0 ? s * 0x8000 : s * 0x7FFF, i * 2)
+      }
+      assemblyEngine.feedAudio(int16)
+    } catch (err: any) {
+      console.error("[STT] AssemblyAI feed error:", err.message)
+    }
+  })
+
+  ipcMain.handle("stt-stop-assemblyai", async () => {
+    const text = assemblyEngine.stop()
+    return { success: true, text }
+  })
+
+  // ── Google Cloud STT ──
+  const googleEngine = new GoogleSTTEngine()
+
+  ipcMain.handle("stt-init-google-stt", async () => {
+    const mainWindow = appState.getMainWindow()
+    if (!mainWindow) return { success: false, error: "No window" }
+    const ok = await googleEngine.init(mainWindow)
+    return { success: ok, error: ok ? undefined : "Google STT init failed" }
+  })
+
+  ipcMain.handle("stt-feed-audio-google-stt", async (_, base64Float32: string) => {
+    if (!googleEngine.isRunning()) return
+    try {
+      const buf = Buffer.from(base64Float32, "base64")
+      const ab = new ArrayBuffer(buf.byteLength)
+      new Uint8Array(ab).set(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
+      const float32 = new Float32Array(ab)
+
+      const int16 = Buffer.alloc(float32.length * 2)
+      for (let i = 0; i < float32.length; i++) {
+        const s = Math.max(-1, Math.min(1, float32[i]))
+        int16.writeInt16LE(s < 0 ? s * 0x8000 : s * 0x7FFF, i * 2)
+      }
+      googleEngine.feedAudio(int16)
+    } catch (err: any) {
+      console.error("[STT] Google STT feed error:", err.message)
+    }
+  })
+
+  ipcMain.handle("stt-stop-google-stt", async () => {
+    const text = googleEngine.stop()
     return { success: true, text }
   })
 
@@ -533,13 +639,36 @@ $rec.Dispose()
     }
   })
 
-  // Get vosk model as tar.gz buffer (for vosk-browser in renderer)
+  // Get vosk model tar.gz URL (served via local HTTP to avoid IPC memory crash)
+  let modelServer: ReturnType<typeof import("http").createServer> | null = null
   ipcMain.handle("stt-get-vosk-targz", async () => {
     try {
-      // Use current language model
       const lang = getCurrentLanguage()
       const buffer = await getVoskModelTarGzForLang(lang)
-      return { success: true, data: buffer.toString("base64") }
+
+      // Serve the tar.gz via a one-shot local HTTP server
+      if (modelServer) { try { modelServer.close() } catch {} }
+
+      const http = await import("http")
+      return new Promise<{ success: boolean; url?: string; error?: string }>((resolve) => {
+        modelServer = http.createServer((req, res) => {
+          res.writeHead(200, {
+            "Content-Type": "application/gzip",
+            "Content-Length": buffer.length.toString(),
+            "Access-Control-Allow-Origin": "*",
+          })
+          res.end(buffer)
+        })
+        modelServer.listen(0, "127.0.0.1", () => {
+          const addr = modelServer!.address() as { port: number }
+          const url = `http://127.0.0.1:${addr.port}/model.tar.gz`
+          console.log(`[STT] Serving vosk model at ${url} (${(buffer.length / 1024 / 1024).toFixed(1)} MB)`)
+          resolve({ success: true, url })
+        })
+        modelServer.on("error", (err: any) => {
+          resolve({ success: false, error: err.message })
+        })
+      })
     } catch (err: any) {
       console.error("[STT] Vosk tar.gz creation failed:", err.message)
       return { success: false, error: err.message }

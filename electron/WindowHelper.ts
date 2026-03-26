@@ -108,7 +108,7 @@ export class WindowHelper {
 
     
     const windowSettings: Electron.BrowserWindowConstructorOptions = {
-      width: 640,
+      width: 700,
       height: 350,
       minWidth: 300,
       minHeight: 100,

@@ -392,20 +392,24 @@ async function initializeApp() {
       await preloadVoskModel()
 
       // Clean up old vosk model files
+      // Clean up old model files
       try {
-        const oldVoskDir = path.join(app.getPath("userData"), "models", "vosk-model-small-en-us-0.15")
-        const oldVoskTarGz = path.join(app.getPath("userData"), "models", "vosk-model-small-en-us-0.15.tar.gz")
         const fs = await import("fs")
-        if (fs.existsSync(oldVoskDir)) {
-          fs.rmSync(oldVoskDir, { recursive: true })
-          console.log("[App] Deleted old vosk model directory")
-        }
-        if (fs.existsSync(oldVoskTarGz)) {
-          fs.unlinkSync(oldVoskTarGz)
-          console.log("[App] Deleted old vosk tar.gz cache")
+        const modelsDir = path.join(app.getPath("userData"), "models")
+        const oldFiles = [
+          "vosk-model-small-en-us-0.15",
+          "vosk-model-small-en-us-0.15.tar.gz",
+          "sherpa-onnx-streaming-zipformer-en-2023-06-26", // old small sherpa model
+        ]
+        for (const name of oldFiles) {
+          const p = path.join(modelsDir, name)
+          if (fs.existsSync(p)) {
+            fs.rmSync(p, { recursive: true })
+            console.log(`[App] Deleted old model: ${name}`)
+          }
         }
       } catch (err) {
-        console.warn("[App] Failed to clean up old vosk model:", err)
+        console.warn("[App] Failed to clean up old models:", err)
       }
 
       console.log("[App] All downloads complete, creating window...")

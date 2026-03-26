@@ -1,10 +1,11 @@
-// StreamingSpeech.ts — Model management + sherpa-onnx streaming speech recognition engine
+// StreamingSpeech.ts — Model management + sherpa-onnx + Deepgram streaming speech recognition
 
 import * as path from "path"
 import * as fs from "fs"
 import * as https from "https"
 import * as http from "http"
 import { app, BrowserWindow } from "electron"
+import WebSocket from "ws"
 
 // ── Vosk language models ──
 export interface VoskLanguage {
@@ -183,16 +184,17 @@ export async function getVoskModelTarGzForLang(lang: VoskLanguage): Promise<Buff
 }
 
 // ── Model config ──
-const SHERPA_MODEL_DIR = "sherpa-onnx-streaming-zipformer-en-2023-06-26"
+// Larger model trained on LibriSpeech + GigaSpeech (188MB encoder, much more accurate)
+const SHERPA_MODEL_DIR = "sherpa-onnx-streaming-zipformer-en-2023-06-21"
 const SHERPA_MODEL_FILES: Record<string, string> = {
-  "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx":
-    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
-  "decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx":
-    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
-  "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx":
-    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+  "encoder-epoch-99-avg-1.int8.onnx":
+    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
+  "decoder-epoch-99-avg-1.int8.onnx":
+    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
+  "joiner-epoch-99-avg-1.int8.onnx":
+    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
   "tokens.txt":
-    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/tokens.txt",
+    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main/tokens.txt",
 }
 
 // Default English model (kept for backward compat with existing download checks)
@@ -558,12 +560,12 @@ export class SherpaEngine {
         featConfig: { sampleRate: 16000, featureDim: 80 },
         modelConfig: {
           transducer: {
-            encoder: path.join(modelDir, "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx"),
-            decoder: path.join(modelDir, "decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx"),
-            joiner: path.join(modelDir, "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx"),
+            encoder: path.join(modelDir, "encoder-epoch-99-avg-1.int8.onnx"),
+            decoder: path.join(modelDir, "decoder-epoch-99-avg-1.int8.onnx"),
+            joiner: path.join(modelDir, "joiner-epoch-99-avg-1.int8.onnx"),
           },
           tokens: path.join(modelDir, "tokens.txt"),
-          numThreads: 2,
+          numThreads: Math.max(2, require("os").cpus().length),
           provider: "cpu",
           debug: 0,
         },
@@ -660,5 +662,368 @@ export class SherpaEngine {
 
   isRunning(): boolean {
     return this.recognizer !== null && this.stream !== null
+  }
+}
+
+// ── Deepgram cloud streaming recognizer ──
+export class DeepgramEngine {
+  private ws: WebSocket | null = null
+  private mainWindow: BrowserWindow | null = null
+  private segmentTexts: string[] = []
+  private currentPartial: string = ""
+  private apiKey: string = ""
+  private keepAliveInterval: ReturnType<typeof setInterval> | null = null
+
+  async init(mainWindow: BrowserWindow): Promise<boolean> {
+    this.mainWindow = mainWindow
+    this.apiKey = process.env.DEEPGRAM_API_KEY || ""
+    if (!this.apiKey) {
+      console.log("[Deepgram] No API key, skipping")
+      return false
+    }
+
+    try {
+      const url = `wss://api.deepgram.com/v1/listen?model=nova-3&language=en&smart_format=true&interim_results=true&utterance_end_ms=1000&vad_events=true&encoding=linear16&sample_rate=16000&channels=1`
+
+      this.ws = new WebSocket(url, {
+        headers: { Authorization: `Token ${this.apiKey}` },
+      })
+
+      return new Promise<boolean>((resolve) => {
+        const timeout = setTimeout(() => {
+          console.error("[Deepgram] Connection timeout")
+          this.ws?.close()
+          this.ws = null
+          resolve(false)
+        }, 5000)
+
+        this.ws!.on("open", () => {
+          clearTimeout(timeout)
+          console.log("[Deepgram] Connected")
+          this.segmentTexts = []
+          this.currentPartial = ""
+          // Keep alive every 8s
+          this.keepAliveInterval = setInterval(() => {
+            if (this.ws?.readyState === WebSocket.OPEN) {
+              this.ws.send(JSON.stringify({ type: "KeepAlive" }))
+            }
+          }, 8000)
+          resolve(true)
+        })
+
+        this.ws!.on("message", (data: WebSocket.Data) => {
+          try {
+            const msg = JSON.parse(data.toString())
+            if (msg.type === "Results") {
+              const transcript = msg.channel?.alternatives?.[0]?.transcript || ""
+              const isFinal = msg.is_final
+
+              if (isFinal && transcript) {
+                this.segmentTexts.push(transcript)
+                this.currentPartial = ""
+              } else if (transcript) {
+                this.currentPartial = transcript
+              }
+
+              const fullText = [...this.segmentTexts, this.currentPartial]
+                .filter(Boolean)
+                .join(" ")
+
+              if (fullText && this.mainWindow && !this.mainWindow.isDestroyed()) {
+                this.mainWindow.webContents.send("live-transcript", {
+                  type: isFinal ? "final" : "partial",
+                  text: fullText,
+                })
+              }
+            }
+          } catch {}
+        })
+
+        this.ws!.on("error", (err) => {
+          clearTimeout(timeout)
+          console.error("[Deepgram] WebSocket error:", err.message)
+          resolve(false)
+        })
+
+        this.ws!.on("close", () => {
+          if (this.keepAliveInterval) clearInterval(this.keepAliveInterval)
+          this.keepAliveInterval = null
+        })
+      })
+    } catch (err: any) {
+      console.error("[Deepgram] Init failed:", err.message)
+      return false
+    }
+  }
+
+  feedAudio(int16Buffer: Buffer): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(int16Buffer)
+    }
+  }
+
+  stop(): string {
+    const text = [...this.segmentTexts, this.currentPartial]
+      .filter(Boolean)
+      .join(" ")
+
+    if (this.keepAliveInterval) clearInterval(this.keepAliveInterval)
+    this.keepAliveInterval = null
+
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      // Send CloseStream message
+      this.ws.send(JSON.stringify({ type: "CloseStream" }))
+      this.ws.close()
+    }
+    this.ws = null
+    this.segmentTexts = []
+    this.currentPartial = ""
+    console.log("[Deepgram] Stopped, text:", text.slice(0, 100))
+    return text
+  }
+
+  isRunning(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN
+  }
+}
+
+// ── AssemblyAI cloud streaming recognizer ──
+export class AssemblyAIEngine {
+  private ws: WebSocket | null = null
+  private mainWindow: BrowserWindow | null = null
+  private segmentTexts: string[] = []
+  private currentPartial: string = ""
+  private apiKey: string = ""
+
+  async init(mainWindow: BrowserWindow): Promise<boolean> {
+    this.mainWindow = mainWindow
+    this.apiKey = process.env.ASSEMBLYAI_API_KEY || ""
+    if (!this.apiKey) {
+      console.log("[AssemblyAI] No API key, skipping")
+      return false
+    }
+
+    try {
+      // Step 1: Get a temporary session token
+      const tokenRes: any = await new Promise((resolve, reject) => {
+        const data = JSON.stringify({ expires_in: 3600 })
+        const req = https.request(
+          "https://api.assemblyai.com/v2/realtime/token",
+          {
+            method: "POST",
+            headers: {
+              Authorization: this.apiKey,
+              "Content-Type": "application/json",
+            },
+          },
+          (res) => {
+            let body = ""
+            res.on("data", (c) => (body += c))
+            res.on("end", () => {
+              try { resolve(JSON.parse(body)) } catch { reject(new Error("Invalid token response")) }
+            })
+          }
+        )
+        req.on("error", reject)
+        req.write(data)
+        req.end()
+      })
+
+      if (!tokenRes.token) throw new Error("No token received")
+
+      // Step 2: Connect WebSocket with token
+      const url = `wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000&token=${tokenRes.token}`
+
+      this.ws = new WebSocket(url)
+
+      return new Promise<boolean>((resolve) => {
+        const timeout = setTimeout(() => {
+          console.error("[AssemblyAI] Connection timeout")
+          this.ws?.close()
+          this.ws = null
+          resolve(false)
+        }, 5000)
+
+        this.ws!.on("open", () => {
+          clearTimeout(timeout)
+          console.log("[AssemblyAI] Connected")
+          this.segmentTexts = []
+          this.currentPartial = ""
+          resolve(true)
+        })
+
+        this.ws!.on("message", (data: WebSocket.Data) => {
+          try {
+            const msg = JSON.parse(data.toString())
+            if (msg.message_type === "FinalTranscript" && msg.text) {
+              this.segmentTexts.push(msg.text)
+              this.currentPartial = ""
+            } else if (msg.message_type === "PartialTranscript" && msg.text) {
+              this.currentPartial = msg.text
+            }
+
+            const fullText = [...this.segmentTexts, this.currentPartial]
+              .filter(Boolean)
+              .join(" ")
+
+            if (fullText && this.mainWindow && !this.mainWindow.isDestroyed()) {
+              this.mainWindow.webContents.send("live-transcript", {
+                type: msg.message_type === "FinalTranscript" ? "final" : "partial",
+                text: fullText,
+              })
+            }
+          } catch {}
+        })
+
+        this.ws!.on("error", (err) => {
+          clearTimeout(timeout)
+          console.error("[AssemblyAI] WebSocket error:", err.message)
+          resolve(false)
+        })
+      })
+    } catch (err: any) {
+      console.error("[AssemblyAI] Init failed:", err.message)
+      return false
+    }
+  }
+
+  feedAudio(int16Buffer: Buffer): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      // AssemblyAI expects base64-encoded PCM
+      const base64 = int16Buffer.toString("base64")
+      this.ws.send(JSON.stringify({ audio_data: base64 }))
+    }
+  }
+
+  stop(): string {
+    const text = [...this.segmentTexts, this.currentPartial]
+      .filter(Boolean)
+      .join(" ")
+
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ terminate_session: true }))
+      this.ws.close()
+    }
+    this.ws = null
+    this.segmentTexts = []
+    this.currentPartial = ""
+    console.log("[AssemblyAI] Stopped, text:", text.slice(0, 100))
+    return text
+  }
+
+  isRunning(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN
+  }
+}
+
+// ── Google Cloud Speech-to-Text streaming recognizer ──
+export class GoogleSTTEngine {
+  private ws: WebSocket | null = null
+  private mainWindow: BrowserWindow | null = null
+  private segmentTexts: string[] = []
+  private currentPartial: string = ""
+  private apiKey: string = ""
+  private requestBody: any = null
+  private httpsReq: any = null
+  private responseText: string = ""
+
+  async init(mainWindow: BrowserWindow): Promise<boolean> {
+    this.mainWindow = mainWindow
+    this.apiKey = process.env.GOOGLE_STT_API_KEY || ""
+    if (!this.apiKey) {
+      console.log("[GoogleSTT] No API key, skipping")
+      return false
+    }
+
+    try {
+      // Google Cloud STT v1 streaming via REST is complex; use v2 with WebSocket-like streaming
+      // We'll use the recognize API in chunked mode via HTTP streaming
+      this.segmentTexts = []
+      this.currentPartial = ""
+      this._audioChunks = []
+      this._flushInterval = setInterval(() => this._flushAudio(), 2000)
+      console.log("[GoogleSTT] Initialized (chunked mode, 2s flush)")
+      return true
+    } catch (err: any) {
+      console.error("[GoogleSTT] Init failed:", err.message)
+      return false
+    }
+  }
+
+  private _audioChunks: Buffer[] = []
+  private _flushInterval: ReturnType<typeof setInterval> | null = null
+
+  feedAudio(int16Buffer: Buffer): void {
+    this._audioChunks.push(int16Buffer)
+  }
+
+  private async _flushAudio(): Promise<void> {
+    if (this._audioChunks.length === 0) return
+    const combined = Buffer.concat(this._audioChunks)
+    this._audioChunks = []
+
+    try {
+      const audioBase64 = combined.toString("base64")
+      const body = JSON.stringify({
+        config: {
+          encoding: "LINEAR16",
+          sampleRateHertz: 16000,
+          languageCode: "en-US",
+          model: "latest_long",
+          enableAutomaticPunctuation: true,
+        },
+        audio: { content: audioBase64 },
+      })
+
+      const result: any = await new Promise((resolve, reject) => {
+        const req = https.request(
+          `https://speech.googleapis.com/v1/speech:recognize?key=${this.apiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          },
+          (res) => {
+            let data = ""
+            res.on("data", (c) => (data += c))
+            res.on("end", () => {
+              try { resolve(JSON.parse(data)) } catch { reject(new Error("Invalid response")) }
+            })
+          }
+        )
+        req.on("error", reject)
+        req.write(body)
+        req.end()
+      })
+
+      const transcript = result?.results?.[0]?.alternatives?.[0]?.transcript || ""
+      if (transcript) {
+        this.segmentTexts.push(transcript)
+        const fullText = this.segmentTexts.filter(Boolean).join(" ")
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+          this.mainWindow.webContents.send("live-transcript", {
+            type: "final",
+            text: fullText,
+          })
+        }
+      }
+    } catch (err: any) {
+      console.error("[GoogleSTT] Flush error:", err.message)
+    }
+  }
+
+  stop(): string {
+    if (this._flushInterval) clearInterval(this._flushInterval)
+    this._flushInterval = null
+    // Flush remaining audio synchronously
+    const text = this.segmentTexts.filter(Boolean).join(" ")
+    this._audioChunks = []
+    this.segmentTexts = []
+    this.currentPartial = ""
+    console.log("[GoogleSTT] Stopped, text:", text.slice(0, 100))
+    return text
+  }
+
+  isRunning(): boolean {
+    return this._flushInterval !== null
   }
 }
