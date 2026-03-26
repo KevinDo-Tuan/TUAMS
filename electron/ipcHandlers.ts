@@ -6,6 +6,7 @@ import { execFile, spawn, ChildProcess } from "child_process"
 import * as path from "path"
 import * as fs from "fs"
 import * as os from "os"
+import * as https from "https"
 import {
   SherpaEngine,
   DeepgramEngine,
@@ -25,6 +26,89 @@ import {
 } from "./StreamingSpeech"
 
 export function initializeIpcHandlers(appState: AppState): void {
+  // Cleanup leftover recording frames from crashed sessions
+  const recordingFramesDir = path.join(app.getPath("userData"), "recording_frames")
+  try {
+    if (fs.existsSync(recordingFramesDir)) {
+      fs.rmSync(recordingFramesDir, { recursive: true, force: true })
+    }
+    fs.mkdirSync(recordingFramesDir, { recursive: true })
+  } catch (e) {
+    console.error("[RecordingFrames] Startup cleanup error:", e)
+  }
+
+  // Save a single recording frame to disk
+  ipcMain.handle(
+    "save-recording-frame",
+    async (_event, sessionId: string, base64: string, index: number) => {
+      try {
+        const sessionDir = path.join(recordingFramesDir, sessionId)
+        fs.mkdirSync(sessionDir, { recursive: true })
+        const fileName = `frame_${String(index).padStart(6, "0")}.jpg`
+        const filePath = path.join(sessionDir, fileName)
+        await fs.promises.writeFile(filePath, Buffer.from(base64, "base64"))
+        return { success: true }
+      } catch (err: any) {
+        console.error("[RecordingFrames] Save error:", err)
+        return { success: false, error: err.message }
+      }
+    }
+  )
+
+  // Sample N evenly-spaced frames from a recording session, return as base64
+  ipcMain.handle(
+    "sample-recording-frames",
+    async (_event, sessionId: string, count: number) => {
+      try {
+        const sessionDir = path.join(recordingFramesDir, sessionId)
+        if (!fs.existsSync(sessionDir)) return []
+        const files = fs.readdirSync(sessionDir)
+          .filter((f: string) => f.startsWith("frame_") && f.endsWith(".jpg"))
+          .sort()
+        const total = files.length
+        if (total === 0) return []
+        if (total <= count) {
+          return await Promise.all(
+            files.map((f: string) =>
+              fs.promises.readFile(path.join(sessionDir, f)).then((buf: Buffer) => buf.toString("base64"))
+            )
+          )
+        }
+        // Pick evenly-spaced indices, always include first and last
+        const indices: number[] = [0]
+        for (let i = 1; i < count - 1; i++) {
+          indices.push(Math.round((i * (total - 1)) / (count - 1)))
+        }
+        indices.push(total - 1)
+        // Deduplicate
+        const unique = [...new Set(indices)]
+        return await Promise.all(
+          unique.map((idx: number) =>
+            fs.promises.readFile(path.join(sessionDir, files[idx])).then((buf: Buffer) => buf.toString("base64"))
+          )
+        )
+      } catch (err: any) {
+        console.error("[RecordingFrames] Sample error:", err)
+        return []
+      }
+    }
+  )
+
+  // Cleanup recording frames for a session
+  ipcMain.handle(
+    "cleanup-recording-frames",
+    async (_event, sessionId: string) => {
+      try {
+        const sessionDir = path.join(recordingFramesDir, sessionId)
+        if (fs.existsSync(sessionDir)) {
+          fs.rmSync(sessionDir, { recursive: true, force: true })
+        }
+      } catch (err) {
+        console.error("[RecordingFrames] Cleanup error:", err)
+      }
+    }
+  )
+
   ipcMain.handle(
     "update-content-dimensions",
     async (event, { width, height }: { width: number; height: number }) => {
@@ -348,13 +432,214 @@ export function initializeIpcHandlers(appState: AppState): void {
     const ts = Date.now()
     const webmPath = path.join(tmpDir, `cluely-audio-${ts}.webm`)
     const wavPath = path.join(tmpDir, `cluely-audio-${ts}.wav`)
+    const lang = getCurrentLanguage().code
 
     try {
       const buffer = Buffer.from(audioBase64, "base64")
       fs.writeFileSync(webmPath, buffer)
-      console.log(`[Transcribe] Saved ${buffer.length} bytes to ${webmPath}`)
+      console.log(`[Transcribe] Saved ${buffer.length} bytes to ${webmPath} (lang=${lang})`)
 
-      // 1) Try Whisper CLI (supports webm natively — no conversion needed)
+      // 1) Try Deepgram REST API (accepts webm directly)
+      const deepgramKey = process.env.DEEPGRAM_API_KEY || ""
+      if (deepgramKey) {
+        try {
+          const dgText = await new Promise<string>((resolve, reject) => {
+            const req = https.request(
+              `https://api.deepgram.com/v1/listen?model=nova-3&language=${lang}&smart_format=true`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Token ${deepgramKey}`,
+                  "Content-Type": "audio/webm",
+                },
+              },
+              (res) => {
+                let body = ""
+                res.on("data", (c) => (body += c))
+                res.on("end", () => {
+                  try {
+                    const json = JSON.parse(body)
+                    const transcript = json?.results?.channels?.[0]?.alternatives?.[0]?.transcript || ""
+                    if (transcript) resolve(transcript)
+                    else reject(new Error("No transcript in Deepgram response"))
+                  } catch { reject(new Error("Invalid Deepgram response")) }
+                })
+              }
+            )
+            req.on("error", reject)
+            req.setTimeout(30000, () => { req.destroy(); reject(new Error("Deepgram timeout")) })
+            req.write(buffer)
+            req.end()
+          })
+          console.log("[Transcribe] Deepgram REST succeeded")
+          return { success: true, text: dgText }
+        } catch (dgErr: any) {
+          console.log("[Transcribe] Deepgram REST failed:", dgErr.message)
+        }
+      }
+
+      // 2) Try AssemblyAI REST API (upload → transcribe → poll)
+      const assemblyKey = process.env.ASSEMBLYAI_API_KEY || ""
+      if (assemblyKey) {
+        try {
+          // Upload audio
+          const uploadUrl = await new Promise<string>((resolve, reject) => {
+            const req = https.request(
+              "https://api.assemblyai.com/v2/upload",
+              {
+                method: "POST",
+                headers: {
+                  Authorization: assemblyKey,
+                  "Content-Type": "application/octet-stream",
+                  "Transfer-Encoding": "chunked",
+                },
+              },
+              (res) => {
+                let body = ""
+                res.on("data", (c) => (body += c))
+                res.on("end", () => {
+                  try {
+                    const json = JSON.parse(body)
+                    if (json.upload_url) resolve(json.upload_url)
+                    else reject(new Error("No upload_url"))
+                  } catch { reject(new Error("Invalid upload response")) }
+                })
+              }
+            )
+            req.on("error", reject)
+            req.setTimeout(30000, () => { req.destroy(); reject(new Error("Upload timeout")) })
+            req.write(buffer)
+            req.end()
+          })
+
+          // Create transcription
+          const transcriptId = await new Promise<string>((resolve, reject) => {
+            const payload = JSON.stringify({
+              audio_url: uploadUrl,
+              language_code: lang === "en" ? "en" : lang,
+            })
+            const req = https.request(
+              "https://api.assemblyai.com/v2/transcript",
+              {
+                method: "POST",
+                headers: {
+                  Authorization: assemblyKey,
+                  "Content-Type": "application/json",
+                },
+              },
+              (res) => {
+                let body = ""
+                res.on("data", (c) => (body += c))
+                res.on("end", () => {
+                  try {
+                    const json = JSON.parse(body)
+                    if (json.id) resolve(json.id)
+                    else reject(new Error("No transcript id"))
+                  } catch { reject(new Error("Invalid transcript response")) }
+                })
+              }
+            )
+            req.on("error", reject)
+            req.write(payload)
+            req.end()
+          })
+
+          // Poll for result (max 60s)
+          const aaiText = await new Promise<string>((resolve, reject) => {
+            let attempts = 0
+            const poll = () => {
+              if (attempts++ > 30) { reject(new Error("AssemblyAI poll timeout")); return }
+              https.get(
+                `https://api.assemblyai.com/v2/transcript/${transcriptId}`,
+                { headers: { Authorization: assemblyKey } },
+                (res) => {
+                  let body = ""
+                  res.on("data", (c) => (body += c))
+                  res.on("end", () => {
+                    try {
+                      const json = JSON.parse(body)
+                      if (json.status === "completed" && json.text) resolve(json.text)
+                      else if (json.status === "error") reject(new Error(json.error || "Transcription error"))
+                      else setTimeout(poll, 2000)
+                    } catch { reject(new Error("Invalid poll response")) }
+                  })
+                }
+              ).on("error", reject)
+            }
+            poll()
+          })
+          console.log("[Transcribe] AssemblyAI REST succeeded")
+          return { success: true, text: aaiText }
+        } catch (aaiErr: any) {
+          console.log("[Transcribe] AssemblyAI REST failed:", aaiErr.message)
+        }
+      }
+
+      // 3) Try Google Cloud STT REST API (needs wav conversion)
+      const googleKey = process.env.GOOGLE_STT_API_KEY || ""
+      if (googleKey) {
+        try {
+          // Convert webm to wav
+          await new Promise<void>((resolve, reject) => {
+            execFile(
+              "ffmpeg",
+              ["-y", "-i", webmPath, "-ar", "16000", "-ac", "1", "-f", "wav", wavPath],
+              { timeout: 15000 },
+              (error) => { if (error) reject(error); else resolve() }
+            )
+          })
+          const wavBuffer = fs.readFileSync(wavPath)
+          const wavBase64 = wavBuffer.toString("base64")
+
+          const GOOGLE_LANG_MAP: Record<string, string> = {
+            en: "en-US", zh: "zh-CN", es: "es-ES", fr: "fr-FR", de: "de-DE",
+            ru: "ru-RU", ja: "ja-JP", ko: "ko-KR", pt: "pt-BR", it: "it-IT", vi: "vi-VN",
+          }
+          const googleLang = GOOGLE_LANG_MAP[lang] || `${lang}-${lang.toUpperCase()}`
+
+          const gText = await new Promise<string>((resolve, reject) => {
+            const payload = JSON.stringify({
+              config: {
+                encoding: "LINEAR16",
+                sampleRateHertz: 16000,
+                languageCode: googleLang,
+                model: "latest_long",
+                enableAutomaticPunctuation: true,
+              },
+              audio: { content: wavBase64 },
+            })
+            const req = https.request(
+              `https://speech.googleapis.com/v1/speech:recognize?key=${googleKey}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+              },
+              (res) => {
+                let body = ""
+                res.on("data", (c) => (body += c))
+                res.on("end", () => {
+                  try {
+                    const json = JSON.parse(body)
+                    const transcript = json?.results?.map((r: any) => r.alternatives?.[0]?.transcript || "").join(" ").trim()
+                    if (transcript) resolve(transcript)
+                    else reject(new Error("No transcript in Google response"))
+                  } catch { reject(new Error("Invalid Google response")) }
+                })
+              }
+            )
+            req.on("error", reject)
+            req.setTimeout(30000, () => { req.destroy(); reject(new Error("Google STT timeout")) })
+            req.write(payload)
+            req.end()
+          })
+          console.log("[Transcribe] Google STT REST succeeded")
+          return { success: true, text: gText }
+        } catch (gErr: any) {
+          console.log("[Transcribe] Google STT REST failed:", gErr.message)
+        }
+      }
+
+      // 4) Try Whisper CLI (supports webm natively — no conversion needed)
       try {
         const whisperText = await new Promise<string>((resolve, reject) => {
           execFile(
@@ -380,24 +665,25 @@ export function initializeIpcHandlers(appState: AppState): void {
         console.log("[Transcribe] Whisper succeeded")
         return { success: true, text: whisperText }
       } catch (whisperErr: any) {
-        console.log("[Transcribe] Whisper unavailable, trying Windows Speech Recognition...", whisperErr.message)
+        console.log("[Transcribe] Whisper unavailable:", whisperErr.message)
       }
 
-      // 2) Fallback: convert webm→wav via ffmpeg, then Windows Speech Recognition
+      // 5) Fallback: convert webm→wav via ffmpeg, then Windows Speech Recognition
       if (process.platform === "win32") {
         try {
-          // Convert webm to wav via ffmpeg (required for System.Speech)
-          await new Promise<void>((resolve, reject) => {
-            execFile(
-              "ffmpeg",
-              ["-y", "-i", webmPath, "-ar", "16000", "-ac", "1", "-f", "wav", wavPath],
-              { timeout: 15000 },
-              (error) => {
-                if (error) reject(error)
-                else resolve()
-              }
-            )
-          })
+          if (!fs.existsSync(wavPath)) {
+            await new Promise<void>((resolve, reject) => {
+              execFile(
+                "ffmpeg",
+                ["-y", "-i", webmPath, "-ar", "16000", "-ac", "1", "-f", "wav", wavPath],
+                { timeout: 15000 },
+                (error) => {
+                  if (error) reject(error)
+                  else resolve()
+                }
+              )
+            })
+          }
 
           const psScript = `
 Add-Type -AssemblyName System.Speech
@@ -410,7 +696,6 @@ if ($result) { $result.Text } else { '' }
 $rec.Dispose()
 `
           const winText = await new Promise<string>((resolve, reject) => {
-            // Use Windows PowerShell 5.1 (has System.Speech), not pwsh 7
             const psExe = path.join(
               process.env.SystemRoot || "C:\\Windows",
               "System32", "WindowsPowerShell", "v1.0", "powershell.exe"
@@ -514,7 +799,8 @@ $rec.Dispose()
   ipcMain.handle("stt-init-deepgram", async () => {
     const mainWindow = appState.getMainWindow()
     if (!mainWindow) return { success: false, error: "No window" }
-    const ok = await deepgramEngine.init(mainWindow)
+    const lang = getCurrentLanguage().code
+    const ok = await deepgramEngine.init(mainWindow, lang)
     return { success: ok, error: ok ? undefined : "Deepgram init failed (no API key or connection error)" }
   })
 
@@ -550,7 +836,8 @@ $rec.Dispose()
   ipcMain.handle("stt-init-assemblyai", async () => {
     const mainWindow = appState.getMainWindow()
     if (!mainWindow) return { success: false, error: "No window" }
-    const ok = await assemblyEngine.init(mainWindow)
+    const lang = getCurrentLanguage().code
+    const ok = await assemblyEngine.init(mainWindow, lang)
     return { success: ok, error: ok ? undefined : "AssemblyAI init failed" }
   })
 
@@ -584,7 +871,8 @@ $rec.Dispose()
   ipcMain.handle("stt-init-google-stt", async () => {
     const mainWindow = appState.getMainWindow()
     if (!mainWindow) return { success: false, error: "No window" }
-    const ok = await googleEngine.init(mainWindow)
+    const lang = getCurrentLanguage().code
+    const ok = await googleEngine.init(mainWindow, lang)
     return { success: ok, error: ok ? undefined : "Google STT init failed" }
   })
 

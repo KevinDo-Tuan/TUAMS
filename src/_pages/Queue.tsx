@@ -40,7 +40,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
   const [isChatOpen, setIsChatOpen] = useState(false)
   const chatInputRef = useRef<HTMLInputElement>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
-  const [pendingAttachment, setPendingAttachment] = useState<{ transcript: string; frames: string[]; type?: 'recording' | 'screenshot' | 'pdf'; fileName?: string } | null>(null)
+  const [pendingAttachment, setPendingAttachment] = useState<{ transcript: string; frames: string[]; type?: 'recording' | 'screenshot' | 'pdf'; fileName?: string; sessionId?: string; frameCount?: number } | null>(null)
 
   const [isListening, setIsListening] = useState(false)
   const originalBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
@@ -160,6 +160,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     setChatLoading(true)
     setChatInput("")
     setPendingAttachment(null)
+    // Note: recording frame cleanup happens after sampling in the attachment handler below
 
     try {
       let response: string
@@ -178,8 +179,16 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
             ? `${contextPrefix}${userText}\n\nAudio transcript from recording:\n"${attachment.transcript}"\n\nThe attached images are frames captured from the screen during recording.`
             : `${contextPrefix}The user recorded their screen while speaking. Audio transcript:\n"${attachment.transcript}"\n\nThe attached images are frames from the screen recording. Analyze what is shown and provide a helpful response.`
         }
-        // Include auto-captured screenshots as additional context
-        const allFrames = [...attachment.frames, ...autoScreenshotsRef.current.slice(-3)]
+        let allFrames: string[]
+        if (attachment.type === 'recording' && attachment.sessionId) {
+          // Sample 25 evenly-spaced frames from disk
+          const sampledFrames: string[] = await (window.electronAPI as any).sampleRecordingFrames(attachment.sessionId, 25)
+          allFrames = [...sampledFrames, ...autoScreenshotsRef.current.slice(-3)]
+          // Cleanup disk frames after loading
+          ;(window.electronAPI as any).cleanupRecordingFrames(attachment.sessionId).catch(() => {})
+        } else {
+          allFrames = [...attachment.frames, ...autoScreenshotsRef.current.slice(-3)]
+        }
         response = await (window.electronAPI as any).chatWithVision(prompt, allFrames)
       } else {
         response = await window.electronAPI.invoke("ai-chat", contextPrefix + userText)
@@ -335,7 +344,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
           x: bounds.x,
           y: bounds.y,
           width: Math.max(bounds.width, 400),
-          height: 420,
+          height: 700,
         })
       }
     } else {
@@ -378,9 +387,9 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     }
   }
 
-  const handleScreenRecordingMessage = (transcript: string, frames: string[]) => {
+  const handleScreenRecordingMessage = (transcript: string, sessionId: string, frameCount: number) => {
     setIsChatOpen(true)
-    setPendingAttachment({ transcript, frames, type: 'recording' })
+    setPendingAttachment({ transcript, frames: [], type: 'recording', sessionId, frameCount })
     setTimeout(() => chatInputRef.current?.focus(), 50)
   }
 
@@ -590,7 +599,12 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                       <button
                         type="button"
                         className="text-red-400 hover:text-red-300 transition-colors flex-shrink-0 text-[10px]"
-                        onClick={() => setPendingAttachment(null)}
+                        onClick={() => {
+                          if (pendingAttachment?.sessionId) {
+                            ;(window.electronAPI as any).cleanupRecordingFrames(pendingAttachment.sessionId).catch(() => {})
+                          }
+                          setPendingAttachment(null)
+                        }}
                         title="Remove attachment"
                       >
                         ✕

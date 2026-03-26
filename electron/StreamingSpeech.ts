@@ -674,7 +674,7 @@ export class DeepgramEngine {
   private apiKey: string = ""
   private keepAliveInterval: ReturnType<typeof setInterval> | null = null
 
-  async init(mainWindow: BrowserWindow): Promise<boolean> {
+  async init(mainWindow: BrowserWindow, language: string = "en"): Promise<boolean> {
     this.mainWindow = mainWindow
     this.apiKey = process.env.DEEPGRAM_API_KEY || ""
     if (!this.apiKey) {
@@ -683,7 +683,7 @@ export class DeepgramEngine {
     }
 
     try {
-      const url = `wss://api.deepgram.com/v1/listen?model=nova-3&language=en&smart_format=true&interim_results=true&utterance_end_ms=1000&vad_events=true&encoding=linear16&sample_rate=16000&channels=1`
+      const url = `wss://api.deepgram.com/v1/listen?model=nova-3&language=${language}&smart_format=true&interim_results=true&utterance_end_ms=1000&vad_events=true&encoding=linear16&sample_rate=16000&channels=1`
 
       this.ws = new WebSocket(url, {
         headers: { Authorization: `Token ${this.apiKey}` },
@@ -794,14 +794,17 @@ export class AssemblyAIEngine {
   private segmentTexts: string[] = []
   private currentPartial: string = ""
   private apiKey: string = ""
+  private _language: string = "en"
 
-  async init(mainWindow: BrowserWindow): Promise<boolean> {
+  async init(mainWindow: BrowserWindow, language: string = "en"): Promise<boolean> {
     this.mainWindow = mainWindow
     this.apiKey = process.env.ASSEMBLYAI_API_KEY || ""
     if (!this.apiKey) {
       console.log("[AssemblyAI] No API key, skipping")
       return false
     }
+
+    this._language = language
 
     try {
       // Step 1: Get a temporary session token
@@ -831,8 +834,9 @@ export class AssemblyAIEngine {
 
       if (!tokenRes.token) throw new Error("No token received")
 
-      // Step 2: Connect WebSocket with token
-      const url = `wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000&token=${tokenRes.token}`
+      // Step 2: Connect WebSocket with token (include language if not English for multilingual support)
+      const langParam = this._language && this._language !== "en" ? `&language_code=${this._language}` : ""
+      const url = `wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000&token=${tokenRes.token}${langParam}`
 
       this.ws = new WebSocket(url)
 
@@ -917,6 +921,12 @@ export class AssemblyAIEngine {
 }
 
 // ── Google Cloud Speech-to-Text streaming recognizer ──
+// Map 2-letter language codes to Google STT locale codes
+const GOOGLE_LANG_MAP: Record<string, string> = {
+  en: "en-US", zh: "zh-CN", es: "es-ES", fr: "fr-FR", de: "de-DE",
+  ru: "ru-RU", ja: "ja-JP", ko: "ko-KR", pt: "pt-BR", it: "it-IT", vi: "vi-VN",
+}
+
 export class GoogleSTTEngine {
   private ws: WebSocket | null = null
   private mainWindow: BrowserWindow | null = null
@@ -926,8 +936,10 @@ export class GoogleSTTEngine {
   private requestBody: any = null
   private httpsReq: any = null
   private responseText: string = ""
+  private _languageCode: string = "en-US"
 
-  async init(mainWindow: BrowserWindow): Promise<boolean> {
+  async init(mainWindow: BrowserWindow, language: string = "en"): Promise<boolean> {
+    this._languageCode = GOOGLE_LANG_MAP[language] || `${language}-${language.toUpperCase()}`
     this.mainWindow = mainWindow
     this.apiKey = process.env.GOOGLE_STT_API_KEY || ""
     if (!this.apiKey) {
@@ -968,7 +980,7 @@ export class GoogleSTTEngine {
         config: {
           encoding: "LINEAR16",
           sampleRateHertz: 16000,
-          languageCode: "en-US",
+          languageCode: this._languageCode,
           model: "latest_long",
           enableAutomaticPunctuation: true,
         },

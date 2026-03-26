@@ -7,7 +7,7 @@ interface QueueCommandsProps {
   screenshots: Array<{ path: string; preview: string }>
   onChatToggle: () => void
   onVoiceMessage: (text: string, prompt?: string) => void
-  onScreenRecordingMessage: (transcript: string, frames: string[]) => void
+  onScreenRecordingMessage: (transcript: string, sessionId: string, frameCount: number) => void
   actionBarPortalId?: string
   shortcutsBarPortalId?: string
   meetingContext?: string
@@ -43,6 +43,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const [isLangPickerOpen, setIsLangPickerOpen] = useState(false)
   const [langDownloading, setLangDownloading] = useState<string | null>(null)
   const langPickerRef = useRef<HTMLDivElement>(null)
+  const langBtnRef = useRef<HTMLButtonElement>(null)
 
   // Screen + mic recording state
   const [isRecording, setIsRecording] = useState(false)
@@ -53,7 +54,8 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const recStreamRef = useRef<MediaStream | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
   const screenVideoRef = useRef<HTMLVideoElement | null>(null)
-  const framesCapturedRef = useRef<string[]>([])
+  const framesCapturedRef = useRef<number>(0)
+  const recordingSessionRef = useRef<string>("")
   const frameIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Listen mode state
@@ -85,6 +87,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const liveAiAbortRef = useRef<boolean>(false)
   const liveAiInFlightRef = useRef<boolean>(false)
   const liveAiStreamCleanupRef = useRef<(() => void) | null>(null)
+  const liveAiGenRef = useRef<number>(0)
 
   // Auto-screenshot state (record mode only)
   const autoScreenshotIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -311,7 +314,9 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       recAudioCtx.createMediaStreamSource(micStream).connect(recDest)
 
       recChunksRef.current = []
-      framesCapturedRef.current = []
+      framesCapturedRef.current = 0
+      const sessionId = Date.now().toString()
+      recordingSessionRef.current = sessionId
 
       const recorder = new MediaRecorder(recDest.stream)
       recorderRef.current = recorder
@@ -332,11 +337,14 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           autoScreenshotIntervalRef.current = null
         }
 
-        // Capture one last frame
-        if (screenVideoRef.current) {
+        // Capture one last frame to disk
+        if (screenVideoRef.current && framesCapturedRef.current < 21000) {
           const frame = captureFrame(screenVideoRef.current)
-          if (frame && framesCapturedRef.current.length < 30) {
-            framesCapturedRef.current.push(frame)
+          if (frame) {
+            try {
+              await (window.electronAPI as any).saveRecordingFrame(recordingSessionRef.current, frame, framesCapturedRef.current)
+              framesCapturedRef.current++
+            } catch {}
           }
         }
 
@@ -349,10 +357,11 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         screenVideoRef.current = null
         recorderRef.current = null
 
-        const frames = framesCapturedRef.current
+        const frameCount = framesCapturedRef.current
+        const currentSessionId = recordingSessionRef.current
         const audioBlob = new Blob(recChunksRef.current, { type: 'audio/webm' })
 
-        if (audioBlob.size === 0 && frames.length === 0) {
+        if (audioBlob.size === 0 && frameCount === 0) {
           setRecordStatus(null)
           isRecordingRef.current = false
           setIsRecording(false)
@@ -374,8 +383,8 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           isRecordingRef.current = false
           setIsRecording(false)
 
-          if (frames.length > 0) {
-            onScreenRecordingMessage(transcript, frames)
+          if (frameCount > 0) {
+            onScreenRecordingMessage(transcript, currentSessionId, frameCount)
           } else if (transcript.trim()) {
             onVoiceMessage(transcript.trim())
           }
@@ -405,18 +414,26 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       setIsRecording(true)
       setRecordStatus('Recording screen + mic...')
 
-      // 6. Capture first frame immediately, then every 5 seconds (max 10)
+      // 6. Capture first frame immediately, then every 1 second (max 21000)
       const firstFrame = captureFrame(video)
-      if (firstFrame) framesCapturedRef.current.push(firstFrame)
+      if (firstFrame) {
+        ;(window.electronAPI as any).saveRecordingFrame(sessionId, firstFrame, 0)
+          .catch((err: any) => console.error('[Frame] Save error:', err))
+        framesCapturedRef.current = 1
+      }
 
       frameIntervalRef.current = setInterval(() => {
-        if (framesCapturedRef.current.length >= 30) {
+        if (framesCapturedRef.current >= 21000) {
           if (frameIntervalRef.current) clearInterval(frameIntervalRef.current)
           return
         }
         if (screenVideoRef.current) {
           const frame = captureFrame(screenVideoRef.current)
-          if (frame) framesCapturedRef.current.push(frame)
+          if (frame) {
+            const idx = framesCapturedRef.current++
+            ;(window.electronAPI as any).saveRecordingFrame(sessionId, frame, idx)
+              .catch((err: any) => console.error('[Frame] Save error:', err))
+          }
         }
       }, 1000)
 
@@ -937,6 +954,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       liveAiAbortRef.current = false
       setLiveAiSuggestion(null)
       liveAiInFlightRef.current = false
+      liveAiGenRef.current = 0
 
       // Listen for streaming tokens from main process
       const cleanupStreamListener = window.electronAPI.onAiStreamToken((text: string) => {
@@ -951,8 +969,9 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         if (!transcript || transcript.length < 20) return
         if (transcript === lastSentTranscriptRef.current) return
         if (liveAiAbortRef.current) return
-        if (liveAiInFlightRef.current) return
 
+        // Supersede any in-flight request by bumping generation counter
+        const gen = ++liveAiGenRef.current
         lastSentTranscriptRef.current = transcript
         liveAiInFlightRef.current = true
         setLiveAiLoading(true)
@@ -964,16 +983,19 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
           console.log("[LiveAI] Sending to ai-chat-stream, transcript length:", recentTranscript.length)
           const response = await window.electronAPI.invoke("ai-chat-stream", prompt)
-          console.log("[LiveAI] Stream complete, response length:", response?.length)
-          if (!liveAiAbortRef.current) {
+          // Only apply if this is still the latest request
+          if (gen === liveAiGenRef.current && !liveAiAbortRef.current) {
+            console.log("[LiveAI] Stream complete, response length:", response?.length)
             setLiveAiSuggestion(response)
             onLiveAiUpdate?.(response)
           }
         } catch (err) {
-          console.error("[LiveAI] Stream error:", err)
+          if (gen === liveAiGenRef.current) console.error("[LiveAI] Stream error:", err)
         } finally {
-          liveAiInFlightRef.current = false
-          if (!liveAiAbortRef.current) setLiveAiLoading(false)
+          if (gen === liveAiGenRef.current) {
+            liveAiInFlightRef.current = false
+            if (!liveAiAbortRef.current) setLiveAiLoading(false)
+          }
         }
       }, 2000)
 
@@ -1082,11 +1104,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           }`} />
           {isRecording ? 'Stop' : 'Record'}
         </button>
-        {!isRecording && (
-          <div className="flex gap-0.5">
-            <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>O</Kbd>
-          </div>
-        )}
       </div>
 
       <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
@@ -1107,11 +1124,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           </svg>
           {isListening ? 'Stop' : 'Listen'}
         </button>
-        {!isListening && (
-          <div className="flex gap-0.5">
-            <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>J</Kbd>
-          </div>
-        )}
       </div>
 
       <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
@@ -1128,9 +1140,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           </svg>
           Chat
         </button>
-        <div className="flex gap-0.5">
-          <Kbd>Ctrl</Kbd><Kbd>Shift</Kbd><Kbd>C</Kbd>
-        </div>
       </div>
 
       <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-red-400/30 to-transparent" />
@@ -1152,6 +1161,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       {/* Language selector */}
       <div className="relative" ref={langPickerRef}>
         <button
+          ref={langBtnRef}
           className="w-auto h-5 px-1.5 rounded-full bg-white/8 hover:bg-white/15 transition-all duration-200 flex items-center justify-center border border-white/5 hover:border-white/10 interactive gap-1"
           title={`Language: ${currentLang.name}`}
           onClick={() => setIsLangPickerOpen(!isLangPickerOpen)}
@@ -1163,7 +1173,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           </svg>
         </button>
         {isLangPickerOpen && (
-          <div className="absolute top-7 right-0 z-50 w-40 max-h-48 overflow-y-auto liquid-glass-dark shadow-2xl rounded-lg p-1.5 animate-slide-up">
+          <div className="absolute top-7 right-0 z-[9999] w-40 max-h-48 overflow-y-auto liquid-glass-dark shadow-2xl rounded-lg p-1.5 animate-slide-up">
             {languages.map((lang) => (
               <button
                 key={lang.code}

@@ -175,7 +175,7 @@ html.dark, html.dark body, html.dark #root {
     inset 0 1px 0 rgba(255, 255, 255, 0.4),
     inset 0 -1px 0 rgba(0, 0, 0, 0.03);
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   height: 36px !important;
   min-height: 36px !important;
   max-height: 36px !important;
@@ -831,6 +831,36 @@ button, input, select, textarea, .interactive {
 
 /* ── Toast ── */
 .toast-container { animation: slideDown 0.4s var(--transition-bounce) both; }
+
+/* Speech bubble tail */
+.toast-bubble {
+  position: relative;
+}
+.toast-bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -10px;
+  left: 18px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 10px 10px 0 0;
+  border-color: inherit;
+  /* inherit the background color from the toast variant */
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+  border-left-color: transparent;
+}
+/* Match tail color to variant background */
+.toast-bubble.bg-teal-500\/90::after {
+  border-top-color: rgba(20, 184, 166, 0.9);
+}
+.toast-bubble.bg-\[hsla\(200\,85\%\,45\%\,0\.9\)\]::after {
+  border-top-color: hsla(200, 85%, 45%, 0.9);
+}
+.toast-bubble.bg-\[hsla\(0\,72\%\,50\%\,0\.9\)\]::after {
+  border-top-color: hsla(0, 72%, 50%, 0.9);
+}
 
 /* ── Dark Panel ── */
 .dark-panel {

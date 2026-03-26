@@ -55,6 +55,9 @@ interface ElectronAPI {
   setWindowBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<void>
   onAiStreamToken: (callback: (text: string) => void) => () => void
   invoke: (channel: string, ...args: any[]) => Promise<any>
+  saveRecordingFrame: (sessionId: string, base64: string, index: number) => Promise<{ success: boolean }>
+  sampleRecordingFrames: (sessionId: string, count: number) => Promise<string[]>
+  cleanupRecordingFrames: (sessionId: string) => Promise<void>
 }
 
 export const PROCESSING_EVENTS = {
@@ -257,5 +260,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   transcribeAudio: (audioBase64: string) => ipcRenderer.invoke("transcribe-audio", audioBase64),
   chatWithVision: (message: string, images: string[]) => ipcRenderer.invoke("ai-chat-vision", message, images),
   openPdfDialog: () => ipcRenderer.invoke("open-pdf-dialog"),
-  invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args)
+  invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
+  saveRecordingFrame: (sessionId: string, base64: string, index: number) =>
+    ipcRenderer.invoke("save-recording-frame", sessionId, base64, index),
+  sampleRecordingFrames: (sessionId: string, count: number) =>
+    ipcRenderer.invoke("sample-recording-frames", sessionId, count),
+  cleanupRecordingFrames: (sessionId: string) =>
+    ipcRenderer.invoke("cleanup-recording-frames", sessionId),
 } as ElectronAPI)

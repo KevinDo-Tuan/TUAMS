@@ -16,13 +16,14 @@ export const OLLAMA_CLOUD_MODELS = [
 ]
 
 export class LLMHelper {
-  private readonly systemPrompt = `You are Wingman AI, a helpful, proactive assistant for any kind of problem or situation (not just coding). For any user input, analyze the situation, provide a clear problem statement, relevant context, and suggest several possible responses or actions the user could take next. Always explain your reasoning. Present your suggestions as a list of options or next steps.`
+  private readonly systemPrompt = `You are Wingman AI, a helpful, proactive assistant for any kind of problem or situation (not just coding). For any user input, analyze the situation, provide a clear problem statement, relevant context, and suggest several possible responses or actions the user could take next. Always explain your reasoning. Present your suggestions as a list of options or next steps. Don't ever say you are what models. Just say you are their assistant`
   private useCloud: boolean = true
   private ollamaModel: string = "mixtral:8x7b"
   private ollamaUrl: string = "http://localhost:11434"
   private cloudModel: string = "glm-5:cloud"
   private activeModel: string = "glm-5:cloud"
-  private readonly openRouterApiKey = process.env.OPENROUTER_API_KEY || "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"
+  private readonly openRouterApiKey = process.env.OPENROUTER_API_KEY || ""
+  private readonly groqApiKey = process.env.GROQ_API_KEY || ""
 
   // Text chat fallback chain: cloud first → local
   private static readonly TEXT_FALLBACK_CHAIN = [
@@ -299,9 +300,24 @@ export class LLMHelper {
   }
 
   public async chatStream(message: string, onToken: (accumulated: string) => void): Promise<string> {
+    const errors: string[] = []
+
+    // Try Groq first (fastest free option)
+    if (this.groqApiKey) {
+      try {
+        console.log(`[LLMHelper] Trying stream model: groq/llama-3.3-70b-versatile`)
+        const result = await this.callGroqStream(message, onToken)
+        this.activeModel = "groq/llama-3.3-70b-versatile"
+        return result
+      } catch (err) {
+        console.warn(`[LLMHelper] Groq stream failed: ${err.message}`)
+        errors.push(`groq: ${err.message}`)
+      }
+    }
+
+    // Fallback to Ollama chain
     const preferred = this.useCloud ? this.cloudModel : this.ollamaModel
     const chain = [preferred, ...LLMHelper.TEXT_FALLBACK_CHAIN.filter(m => m !== preferred)]
-    const errors: string[] = []
 
     for (const model of chain) {
       try {
@@ -315,6 +331,66 @@ export class LLMHelper {
       }
     }
     throw new Error(`All stream models failed:\n${errors.join('\n')}`)
+  }
+
+  private async callGroqStream(prompt: string, onToken: (accumulated: string) => void): Promise<string> {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 15_000)
+
+    try {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${this.groqApiKey}`,
+        },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages: [{ role: "user", content: prompt }],
+          stream: true,
+          temperature: 0.7,
+          max_tokens: 200,
+        }),
+        signal: controller.signal,
+      })
+
+      if (!response.ok) {
+        throw new Error(`Groq API error: ${response.status} ${response.statusText}`)
+      }
+
+      let accumulated = ""
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error("No response body reader")
+      const decoder = new TextDecoder()
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const chunk = decoder.decode(value, { stream: true })
+        for (const line of chunk.split("\n")) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith("data: ")) continue
+          const data = trimmed.slice(6)
+          if (data === "[DONE]") break
+          try {
+            const parsed = JSON.parse(data)
+            const content = parsed.choices?.[0]?.delta?.content
+            if (content) {
+              accumulated += content
+              onToken(accumulated)
+            }
+          } catch {}
+        }
+      }
+      return accumulated
+    } catch (error) {
+      if (error.name === "AbortError") {
+        throw new Error("Groq stream timed out after 15s")
+      }
+      throw error
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   private async callOllamaStream(url: string, model: string, prompt: string, onToken: (accumulated: string) => void): Promise<string> {

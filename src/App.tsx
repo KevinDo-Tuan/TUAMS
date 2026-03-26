@@ -1,6 +1,5 @@
-import { ToastProvider } from "./components/ui/toast"
+import { ToastProvider, ToastViewport } from "./components/ui/toast"
 import Queue from "./_pages/Queue"
-import { ToastViewport } from "@radix-ui/react-toast"
 import { useCallback, useEffect, useRef, useState } from "react"
 import Solutions from "./_pages/Solutions"
 import { QueryClient, QueryClientProvider } from "react-query"
