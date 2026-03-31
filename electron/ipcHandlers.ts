@@ -430,8 +430,8 @@ export function initializeIpcHandlers(appState: AppState): void {
   ipcMain.handle("transcribe-audio", async (_, audioBase64: string) => {
     const tmpDir = os.tmpdir()
     const ts = Date.now()
-    const webmPath = path.join(tmpDir, `cluely-audio-${ts}.webm`)
-    const wavPath = path.join(tmpDir, `cluely-audio-${ts}.wav`)
+    const webmPath = path.join(tmpDir, `tuams-audio-${ts}.webm`)
+    const wavPath = path.join(tmpDir, `tuams-audio-${ts}.wav`)
     const lang = getCurrentLanguage().code
 
     try {

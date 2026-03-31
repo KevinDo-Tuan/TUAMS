@@ -1,5 +1,5 @@
 {
-  "name": "interview-coder",
+  "name": "tuams",
   "version": "1.0.0",
   "main": "./dist-electron/main.js",
   "scripts": {
@@ -17,8 +17,8 @@
     "dist": "npm run app:build"
   },
   "build": {
-    "appId": "com.electron.meeting-notes",
-    "productName": "Meeting Notes Coder",
+    "appId": "com.electron.tuams",
+    "productName": "Tuams",
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
@@ -96,8 +96,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "ibttf",
-        "repo": "interview-coder-frontend"
+        "owner": "KevinDo-Tuan",
+        "repo": "Tuams"
       }
     ]
   },

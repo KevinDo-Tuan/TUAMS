@@ -525,8 +525,8 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
               <div className="flex-1 min-h-0 overflow-y-auto mb-2 px-3 py-2">
                 {chatMessages.length === 0 ? (
                   <div className="flex items-center justify-center h-full animate-fade-in">
-                    <div className="text-[14px] text-[hsla(210,25%,15%,0.45)] dark:text-[hsla(0,0%,80%,0.45)] font-medium">
-                      Ask your personal assistant
+                    <div className="text-[20px] text-[hsla(0, 0%, 0%, 0.95)] dark:text-[hsla(0, 0%, 100%, 0.00)] font-medium">
+                      Curious? Ask now
                     </div>
                   </div>
                 ) : (
