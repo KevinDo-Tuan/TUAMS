@@ -5,7 +5,7 @@ An invisible desktop AI assistant that provides real-time transcription, AI sugg
 Built with Electron + React + TypeScript.
 
 ---
-<img width="489" height="401" alt="image" src="https://github.com/user-attachments/assets/73d0d7b9-b46e-41b0-9536-ce61265a330e" />
+<img width="1229" height="764" alt="{43AA89B6-9A78-45B4-959C-92DA25181760}" src="https://github.com/user-attachments/assets/993421e5-fecf-4e06-a32c-77e5bc1483ee" />
 <img width="1239" height="764" alt="{01381644-D9BE-4F84-857C-8E213E125D56}" src="https://github.com/user-attachments/assets/e0eb7248-2582-4ffc-b653-6d9508c5526a" />
 
 ---
