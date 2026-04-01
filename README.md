@@ -1,4 +1,4 @@
-# Tuams
+# TUAMS
 
 An invisible desktop AI assistant that provides real-time transcription, AI suggestions, and chat during meetings, interviews, and presentations.
 
